@@ -15,7 +15,12 @@ function ensureDataDir(): void {
 
 export function isEnvEncryptionKeySet(): boolean {
   const raw = process.env.CREDENTIAL_ENCRYPTION_KEY?.trim();
-  return Boolean(raw && raw !== 'replace_with_32_byte_random_hex_secret' && raw.length >= 16);
+  return Boolean(
+    raw &&
+      raw !== 'replace_with_32_byte_random_hex_secret' &&
+      raw !== 'replace_with_64_hex_chars' &&
+      raw.length >= 16,
+  );
 }
 
 function getMasterKey(): Buffer {
@@ -24,7 +29,12 @@ function getMasterKey(): Buffer {
   }
 
   const envKey = process.env.CREDENTIAL_ENCRYPTION_KEY?.trim();
-  if (envKey && envKey !== 'replace_with_32_byte_random_hex_secret' && envKey.length >= 16) {
+  if (
+    envKey &&
+    envKey !== 'replace_with_32_byte_random_hex_secret' &&
+    envKey !== 'replace_with_64_hex_chars' &&
+    envKey.length >= 16
+  ) {
     cachedMasterKey = crypto.createHash('sha256').update(envKey).digest();
     return cachedMasterKey;
   }
@@ -98,7 +108,6 @@ export function redactSensitive(input: string, secrets: Array<string | null | un
       output = output.split(secret).join('[REDACTED_STREAM_KEY]');
     }
   }
-  // Also redact common Facebook stream key query/path patterns just in case
   output = output.replace(/(rtmps?:\/\/[^/\s]+\/rtmp\/)([^\s'"]+)/gi, '$1[REDACTED_STREAM_KEY]');
   return output;
 }

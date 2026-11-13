@@ -12,23 +12,129 @@ import type {
   YouTubeValidationResult,
 } from '../../shared/types';
 
-async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
-    credentials: 'same-origin',
-    ...init,
-    headers: {
-      ...(init?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
-      ...(init?.headers ?? {}),
-    },
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error((data as { error?: string; message?: string }).error || (data as { message?: string }).message || `Request failed (${res.status})`);
+function normalizeBaseUrl(raw: string): string {
+  const trimmed = raw.trim().replace(/\/+$/, '').replace(/\/api$/i, '');
+  if (!trimmed) return '';
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return `https://${trimmed}`;
+}
+
+export const API_BASE_URL = normalizeBaseUrl(import.meta.env.VITE_API_BASE_URL || '');
+
+export function apiUrl(path: string): string {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
+  return API_BASE_URL ? `${API_BASE_URL}${normalizedPath}` : normalizedPath;
+}
+
+export function resolveMediaUrl(url: string | null | undefined): string {
+  if (!url) return '';
+  if (/^https?:\/\//i.test(url)) return url;
+  return apiUrl(url);
+}
+
+export function getWebSocketUrl(): string {
+  if (API_BASE_URL) {
+    try {
+      const parsed = new URL(API_BASE_URL);
+      const wsProto = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
+      return `${wsProto}//${parsed.host}/ws`;
+    } catch {
+      const wsBase = API_BASE_URL.replace(/^https:\/\//i, 'wss://').replace(/^http:\/\//i, 'ws://');
+      return `${wsBase}/ws`;
+    }
   }
-  return data as T;
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.host}/ws`;
+}
+
+async function parseApiResponse<T>(res: Response): Promise<T> {
+  const contentType = (res.headers.get('content-type') || '').toLowerCase();
+  const isJson = contentType.includes('application/json');
+  const rawText = await res.text();
+
+  if (!res.ok) {
+    if (isJson && rawText.trim().length > 0) {
+      try {
+        const parsed = JSON.parse(rawText) as { error?: string; message?: string };
+        throw new Error(
+          parsed.error || parsed.message || `Backend request failed (${res.status} ${res.statusText}).`,
+        );
+      } catch (err) {
+        if (err instanceof Error && !err.message.startsWith('Unexpected')) {
+          throw err;
+        }
+      }
+    }
+
+    if (res.status === 404) {
+      throw new Error(
+        'Backend API endpoint not found (404). If deployed on Netlify, verify VITE_API_BASE_URL is set to your running Render/Node.js backend URL.',
+      );
+    }
+    if (res.status === 502 || res.status === 503 || res.status === 504) {
+      throw new Error(
+        `Backend server is temporarily unavailable (${res.status}). If hosted on Render free tier, wait ~30 seconds for wake-up and retry.`,
+      );
+    }
+
+    throw new Error(
+      `Backend returned non-JSON error (${res.status} ${res.statusText || 'Error'}). Verify VITE_API_BASE_URL and CORS configuration.`,
+    );
+  }
+
+  if (res.status === 204) {
+    return {} as T;
+  }
+
+  if (!rawText.trim()) {
+    throw new Error('Backend returned an empty response instead of JSON.');
+  }
+
+  if (!isJson) {
+    throw new Error(
+      'Expected JSON from backend API, but received HTML or plain text. On Netlify, set VITE_API_BASE_URL to your separate Node.js backend URL and rebuild.',
+    );
+  }
+
+  try {
+    return JSON.parse(rawText) as T;
+  } catch {
+    throw new Error('Backend returned malformed JSON data.');
+  }
+}
+
+async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(apiUrl(path), {
+      credentials: API_BASE_URL ? 'include' : 'same-origin',
+      ...init,
+      headers: {
+        ...(init?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+        ...(init?.headers ?? {}),
+      },
+    });
+  } catch {
+    throw new Error(
+      API_BASE_URL
+        ? `Unable to reach backend server at ${API_BASE_URL}. Confirm the service is running and allows CORS from ${window.location.origin}.`
+        : 'Unable to reach backend API. Ensure the Node.js server is running or configure VITE_API_BASE_URL.',
+    );
+  }
+  return parseApiResponse<T>(res);
 }
 
 export const api = {
+  getHealth: () =>
+    requestJson<{
+      ok: boolean;
+      service: string;
+      ffmpegAvailable: boolean;
+      ffmpegVersion: string | null;
+      status: string;
+      timestamp: string;
+    }>('/api/health'),
+
   getAuthStatus: () => requestJson<SecurityStatusInfo>('/api/auth/status'),
   login: (password: string) =>
     requestJson<{ authenticated: boolean; authRequired: boolean }>('/api/auth/login', {
@@ -63,13 +169,13 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  getRtmpConfig: () => requestJson<RtmpPublicConfig>('/api/rtmp/config'),
+  getRtmpConfig: () => requestJson<RtmpPublicConfig>('/api/stream/credentials'),
   saveRtmpConfig: (serverUrl: string, streamKey?: string) =>
-    requestJson<RtmpPublicConfig>('/api/rtmp/config', {
+    requestJson<RtmpPublicConfig>('/api/stream/credentials', {
       method: 'POST',
       body: JSON.stringify({ serverUrl, streamKey }),
     }),
-  clearRtmpKey: () => requestJson<RtmpPublicConfig>('/api/rtmp/key', { method: 'DELETE' }),
+  clearRtmpKey: () => requestJson<RtmpPublicConfig>('/api/stream/credentials', { method: 'DELETE' }),
 
   getVideos: () => requestJson<{ videos: VideoAsset[] }>('/api/videos'),
   uploadVideo: (file: File) => {
@@ -89,14 +195,30 @@ export const api = {
       method: 'DELETE',
     }),
   validateYouTube: async (url: string): Promise<YouTubeValidationResult> => {
-    const res = await fetch('/api/videos/validate-youtube', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url }),
-    });
-    const data = (await res.json()) as YouTubeValidationResult;
-    return data;
+    let res: Response;
+    try {
+      res = await fetch(apiUrl('/api/videos/validate-youtube'), {
+        method: 'POST',
+        credentials: API_BASE_URL ? 'include' : 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+    } catch {
+      throw new Error('Unable to reach backend API to validate YouTube URL.');
+    }
+
+    const contentType = (res.headers.get('content-type') || '').toLowerCase();
+    const rawText = await res.text();
+    if (!contentType.includes('application/json') || !rawText.trim()) {
+      return parseApiResponse<YouTubeValidationResult>(
+        new Response(rawText, { status: res.status, statusText: res.statusText, headers: res.headers }),
+      );
+    }
+    try {
+      return JSON.parse(rawText) as YouTubeValidationResult;
+    } catch {
+      throw new Error('Received malformed JSON while validating YouTube URL.');
+    }
   },
   validateDirectUrl: (url: string) =>
     requestJson<{

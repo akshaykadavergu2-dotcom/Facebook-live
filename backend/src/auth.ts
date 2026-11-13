@@ -33,7 +33,6 @@ export function verifySessionToken(token: string | undefined): boolean {
   const [issuedStr, sig] = parts;
   const issuedAt = Number(issuedStr);
   if (!Number.isFinite(issuedAt)) return false;
-  // 24h session TTL
   if (Date.now() - issuedAt > 24 * 60 * 60 * 1000) return false;
   const expected = crypto
     .createHmac('sha256', getSessionSecret())
@@ -86,20 +85,29 @@ export function requireStudioAuth(req: Request, res: Response, next: NextFunctio
   });
 }
 
-export function setSessionCookie(res: Response): void {
+export function setSessionCookie(res: Response, req: Request): void {
   const token = signSessionToken(Date.now());
-  const isProd = process.env.NODE_ENV === 'production';
+  const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
+  const isCrossOrigin = Boolean(req.headers.origin);
+  const useNone = isHttps && isCrossOrigin;
+
   res.cookie(COOKIE_NAME, token, {
     httpOnly: true,
-    sameSite: 'lax',
-    secure: isProd,
+    sameSite: useNone ? 'none' : 'lax',
+    secure: isHttps || process.env.NODE_ENV === 'production',
     maxAge: 24 * 60 * 60 * 1000,
     path: '/',
   });
 }
 
-export function clearSessionCookie(res: Response): void {
-  res.clearCookie(COOKIE_NAME, { path: '/' });
+export function clearSessionCookie(res: Response, req: Request): void {
+  const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
+  const isCrossOrigin = Boolean(req.headers.origin);
+  res.clearCookie(COOKIE_NAME, {
+    path: '/',
+    sameSite: isHttps && isCrossOrigin ? 'none' : 'lax',
+    secure: isHttps || process.env.NODE_ENV === 'production',
+  });
 }
 
 export function verifyOperatorPassword(candidate: string): boolean {

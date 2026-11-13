@@ -7,6 +7,7 @@ import type {
   VideoSourceType,
   YouTubeValidationResult,
 } from '../../shared/types';
+import { resolveMediaUrl } from '../lib/api';
 
 declare global {
   interface Window {
@@ -68,7 +69,6 @@ export function VideoPreviewStage({
     setMediaError(null);
   }, [sourceType, selectedVideo?.id, directUrl]);
 
-  // Load official YouTube IFrame Player API when previewing a validated YouTube video
   useEffect(() => {
     if (sourceType !== 'youtube-preview' || !youtubeResult?.valid || !youtubeResult.videoId) {
       if (ytPlayerRef.current) {
@@ -183,17 +183,23 @@ export function VideoPreviewStage({
         ? 'animate-overlay-slide'
         : '';
 
+  const resolvedVideoSrc = selectedVideo ? resolveMediaUrl(selectedVideo.url) : '';
+  const resolvedLogoSrc = overlays.logoUrl ? resolveMediaUrl(overlays.logoUrl) : '';
+
   return (
-    <div className="relative w-full aspect-video bg-[#07090D] rounded-lg overflow-hidden border border-[#232B3A]">
-      {/* Program Video Layer */}
+    <div className="relative w-full max-w-full aspect-video bg-[#07090D] rounded-lg overflow-hidden border border-[#232B3A]">
       {sourceType === 'uploaded' && selectedVideo ? (
         <video
-          key={selectedVideo.url}
-          src={selectedVideo.url}
+          key={resolvedVideoSrc}
+          src={resolvedVideoSrc}
           controls
           loop={loopVideo}
           playsInline
-          onError={() => setMediaError('Browser could not decode this video format directly, though FFmpeg can still transcode it for RTMP.')}
+          onError={() =>
+            setMediaError(
+              'Browser could not preview this video format directly, though the backend FFmpeg engine can still transcode it for RTMP.',
+            )
+          }
           className="w-full h-full object-contain bg-black"
         />
       ) : sourceType === 'direct-url' && directUrl.trim() ? (
@@ -202,7 +208,11 @@ export function VideoPreviewStage({
           src={directUrl.trim()}
           controls
           playsInline
-          onError={() => setMediaError('Browser preview unavailable for this direct stream URL (CORS or HLS container). Use Verify Encoding Pipeline to test FFmpeg ingestion.')}
+          onError={() =>
+            setMediaError(
+              'Browser preview unavailable for this direct stream URL (CORS or HLS container). Use Verify Encoding Pipeline to test backend FFmpeg ingestion.',
+            )
+          }
           className="w-full h-full object-contain bg-black"
         />
       ) : sourceType === 'youtube-preview' && youtubeResult?.valid ? (
@@ -236,7 +246,6 @@ export function VideoPreviewStage({
         </div>
       )}
 
-      {/* Top Program Monitor Status Corner */}
       <div className="pointer-events-none absolute top-3 left-3 flex items-center gap-2 z-20">
         {streamStatus === 'Live' ? (
           <div className="flex items-center gap-1.5 bg-red-600 text-white px-2.5 py-1 rounded text-[11px] font-semibold tracking-wider font-mono">
@@ -256,13 +265,11 @@ export function VideoPreviewStage({
         ) : null}
       </div>
 
-      {/* Real-time Broadcast Graphics Overlays Preview */}
       {showOverlays && (
         <div className="pointer-events-none absolute inset-0 overflow-hidden z-10">
-          {/* PNG Logo Corner */}
-          {overlays.logoEnabled && overlays.logoUrl && (
+          {overlays.logoEnabled && resolvedLogoSrc && (
             <img
-              src={overlays.logoUrl}
+              src={resolvedLogoSrc}
               alt="Broadcast Logo Overlay"
               referrerPolicy="no-referrer"
               style={{
@@ -274,7 +281,6 @@ export function VideoPreviewStage({
             />
           )}
 
-          {/* Headline Banner */}
           {overlays.headlineEnabled && overlays.headlineText.trim().length > 0 && (
             <div
               key={`hl-${overlays.headlineText}-${overlays.headlineAnimation}`}
@@ -289,7 +295,6 @@ export function VideoPreviewStage({
             </div>
           )}
 
-          {/* Lower-Third News Graphic */}
           {overlays.lowerThirdEnabled &&
             (overlays.lowerThirdTitle.trim() || overlays.lowerThirdSubtitle.trim()) && (
               <div
@@ -305,7 +310,7 @@ export function VideoPreviewStage({
                   style={{ backgroundColor: overlays.lowerThirdAccentColor }}
                   className="w-1.5 shrink-0"
                 />
-                <div className="px-3.5 py-2">
+                <div className="px-3.5 py-2 min-w-0">
                   {overlays.lowerThirdTitle.trim() && (
                     <div className="text-sm font-bold leading-tight truncate">
                       {overlays.lowerThirdTitle}
@@ -320,7 +325,6 @@ export function VideoPreviewStage({
               </div>
             )}
 
-          {/* Scrolling News Ticker */}
           {overlays.tickerEnabled && overlays.tickerText.trim().length > 0 && (
             <div
               style={{

@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: livecast-studio-backend
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: ALLOWED_CORS_ORIGIN
+        value: https://streamkarolive.netlify.app
+      - key: CREDENTIAL_ENCRYPTION_KEY
+        generateValue: true
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: MAX_UPLOAD_MB
+        value: "500"
+    disk:
+      name: livecast-storage
+      mountPath: /app/.data
+      sizeGB: 5

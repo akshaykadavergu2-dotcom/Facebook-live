@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -7,7 +7,6 @@ import {
   FileVideo,
   Globe,
   Play,
-  Radio,
   Square,
   Trash2,
   Upload,
@@ -80,6 +79,7 @@ export function LiveStudioView({
 
   const [uploading, setUploading] = useState(false);
   const [generatingSample, setGeneratingSample] = useState(false);
+  const [deletingVideoId, setDeletingVideoId] = useState<string | null>(null);
 
   const [rtmpServerInput, setRtmpServerInput] = useState(rtmpConfig.serverUrl);
   const [rtmpKeyInput, setRtmpKeyInput] = useState('');
@@ -87,11 +87,15 @@ export function LiveStudioView({
   const [savingRtmp, setSavingRtmp] = useState(false);
   const [rtmpFeedback, setRtmpFeedback] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
-  const [streamBusyAction, setStreamBusyAction] = useState(false);
+  const [streamBusyAction, setStreamBusyAction] = useState<'starting' | 'stopping' | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const [pipelineChecking, setPipelineChecking] = useState(false);
   const [pipelineResult, setPipelineResult] = useState<PipelineCheckResult | null>(null);
+
+  useEffect(() => {
+    setRtmpServerInput(rtmpConfig.serverUrl);
+  }, [rtmpConfig.serverUrl]);
 
   const selectedVideo = videos.find((v) => v.id === selectedVideoId) ?? videos[0] ?? null;
   const isStreamingOrConnecting = telemetry.status === 'Live' || telemetry.status === 'Connecting';
@@ -129,6 +133,8 @@ export function LiveStudioView({
   };
 
   const handleDeleteVideo = async (id: string) => {
+    setDeletingVideoId(id);
+    setActionError(null);
     try {
       const res = await api.deleteVideo(id);
       onVideosUpdated(res.videos);
@@ -137,6 +143,8 @@ export function LiveStudioView({
       }
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Failed to delete video.');
+    } finally {
+      setDeletingVideoId(null);
     }
   };
 
@@ -207,7 +215,7 @@ export function LiveStudioView({
       return;
     }
 
-    setStreamBusyAction(true);
+    setStreamBusyAction('starting');
     try {
       const res = await api.startStream({
         sourceType,
@@ -220,20 +228,20 @@ export function LiveStudioView({
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Failed to start live stream.');
     } finally {
-      setStreamBusyAction(false);
+      setStreamBusyAction(null);
     }
   };
 
   const handleStopLive = async () => {
     setActionError(null);
-    setStreamBusyAction(true);
+    setStreamBusyAction('stopping');
     try {
       const res = await api.stopStream();
       onTelemetryUpdated(res.telemetry);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Failed to stop live stream.');
     } finally {
-      setStreamBusyAction(false);
+      setStreamBusyAction(null);
     }
   };
 
@@ -261,19 +269,18 @@ export function LiveStudioView({
   };
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
-      {/* Left 8 columns: Program Monitor, Telemetry, Source Configuration, Activity Logs */}
-      <div className="xl:col-span-8 space-y-5">
-        {/* Program Preview Monitor */}
-        <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-4 space-y-4">
+    <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start min-w-0">
+      {/* Left 8 columns */}
+      <div className="xl:col-span-8 space-y-5 min-w-0">
+        <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-3 sm:p-4 space-y-4 min-w-0">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
+            <div className="min-w-0">
               <h2 className="text-base font-semibold text-slate-100">Program Monitor</h2>
               <p className="text-xs text-slate-400">
                 16:9 broadcast canvas with real-time graphics overlay composition
               </p>
             </div>
-            <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
+            <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none shrink-0">
               <input
                 type="checkbox"
                 checked={showOverlayPreview}
@@ -295,12 +302,11 @@ export function LiveStudioView({
             loopVideo={loopVideo}
           />
 
-          {/* Telemetry Readout Strip */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-1">
-            <div className="bg-[#0E131B] border border-[#232B3A] rounded-md px-3 py-2.5">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 sm:gap-3 pt-1">
+            <div className="bg-[#0E131B] border border-[#232B3A] rounded-md px-3 py-2.5 min-w-0">
               <div className="text-[11px] text-slate-400">Status</div>
               <div
-                className={`text-sm font-semibold mt-0.5 ${
+                className={`text-sm font-semibold mt-0.5 truncate ${
                   telemetry.status === 'Live'
                     ? 'text-red-400'
                     : telemetry.status === 'Connecting'
@@ -313,15 +319,15 @@ export function LiveStudioView({
                 {telemetry.status}
               </div>
             </div>
-            <div className="bg-[#0E131B] border border-[#232B3A] rounded-md px-3 py-2.5">
+            <div className="bg-[#0E131B] border border-[#232B3A] rounded-md px-3 py-2.5 min-w-0">
               <div className="text-[11px] text-slate-400">Duration</div>
-              <div className="text-sm font-semibold text-slate-100 font-mono tabular-nums mt-0.5">
+              <div className="text-sm font-semibold text-slate-100 font-mono tabular-nums mt-0.5 truncate">
                 {formatDuration(telemetry.durationSec)}
               </div>
             </div>
-            <div className="bg-[#0E131B] border border-[#232B3A] rounded-md px-3 py-2.5">
+            <div className="bg-[#0E131B] border border-[#232B3A] rounded-md px-3 py-2.5 min-w-0">
               <div className="text-[11px] text-slate-400">Resolution</div>
-              <div className="text-sm font-semibold text-slate-100 font-mono tabular-nums mt-0.5">
+              <div className="text-sm font-semibold text-slate-100 font-mono tabular-nums mt-0.5 truncate">
                 {isStreamingOrConnecting
                   ? telemetry.outputResolution
                   : quality === '1080p'
@@ -329,15 +335,15 @@ export function LiveStudioView({
                     : '1280x720'}
               </div>
             </div>
-            <div className="bg-[#0E131B] border border-[#232B3A] rounded-md px-3 py-2.5">
+            <div className="bg-[#0E131B] border border-[#232B3A] rounded-md px-3 py-2.5 min-w-0">
               <div className="text-[11px] text-slate-400">Bitrate</div>
-              <div className="text-sm font-semibold text-slate-100 font-mono tabular-nums mt-0.5">
+              <div className="text-sm font-semibold text-slate-100 font-mono tabular-nums mt-0.5 truncate">
                 {telemetry.bitrateKbps > 0 ? `${telemetry.bitrateKbps} kbps` : '0 kbps'}
               </div>
             </div>
-            <div className="bg-[#0E131B] border border-[#232B3A] rounded-md px-3 py-2.5 col-span-2 sm:col-span-1">
+            <div className="bg-[#0E131B] border border-[#232B3A] rounded-md px-3 py-2.5 col-span-2 sm:col-span-1 min-w-0">
               <div className="text-[11px] text-slate-400">Output FPS</div>
-              <div className="text-sm font-semibold text-slate-100 font-mono tabular-nums mt-0.5">
+              <div className="text-sm font-semibold text-slate-100 font-mono tabular-nums mt-0.5 truncate">
                 {telemetry.fps > 0 ? `${telemetry.fps} fps` : '30 fps target'}
               </div>
             </div>
@@ -345,44 +351,44 @@ export function LiveStudioView({
         </section>
 
         {/* Source Input Panel */}
-        <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-5 space-y-4">
+        <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-4 sm:p-5 space-y-4 min-w-0">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <h3 className="text-base font-semibold text-slate-100">Video Source Selection</h3>
-            <div className="inline-flex p-1 bg-[#0B0E14] border border-[#232B3A] rounded-md">
+            <div className="flex flex-wrap gap-1 p-1 bg-[#0B0E14] border border-[#232B3A] rounded-md w-full sm:w-auto">
               <button
                 type="button"
                 onClick={() => onChangeSourceType('uploaded')}
-                className={`px-3 py-1.5 text-xs font-medium rounded transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+                className={`flex-1 sm:flex-initial px-3 py-1.5 text-xs font-medium rounded transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap ${
                   sourceType === 'uploaded'
                     ? 'bg-blue-600 text-white'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                <FileVideo className="w-3.5 h-3.5" />
+                <FileVideo className="w-3.5 h-3.5 shrink-0" />
                 <span>Uploaded Video</span>
               </button>
               <button
                 type="button"
                 onClick={() => onChangeSourceType('direct-url')}
-                className={`px-3 py-1.5 text-xs font-medium rounded transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+                className={`flex-1 sm:flex-initial px-3 py-1.5 text-xs font-medium rounded transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap ${
                   sourceType === 'direct-url'
                     ? 'bg-blue-600 text-white'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                <Globe className="w-3.5 h-3.5" />
+                <Globe className="w-3.5 h-3.5 shrink-0" />
                 <span>Direct Media URL</span>
               </button>
               <button
                 type="button"
                 onClick={() => onChangeSourceType('youtube-preview')}
-                className={`px-3 py-1.5 text-xs font-medium rounded transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+                className={`flex-1 sm:flex-initial px-3 py-1.5 text-xs font-medium rounded transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap ${
                   sourceType === 'youtube-preview'
                     ? 'bg-blue-600 text-white'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                <Youtube className="w-3.5 h-3.5" />
+                <Youtube className="w-3.5 h-3.5 shrink-0" />
                 <span>YouTube URL</span>
               </button>
             </div>
@@ -394,11 +400,11 @@ export function LiveStudioView({
                 <p className="text-xs text-slate-400">
                   Upload authorized MP4, MOV, WebM, or MKV files for FFmpeg RTMP streaming.
                 </p>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
                     onClick={handleGenerateSample}
-                    disabled={generatingSample}
+                    disabled={generatingSample || uploading}
                     className="px-3 py-1.5 text-xs font-medium rounded-md border border-[#2A3447] bg-[#181F2C] text-slate-200 hover:bg-[#1F293A] disabled:opacity-50 whitespace-nowrap"
                   >
                     {generatingSample ? 'Generating...' : 'Generate Sample MP4'}
@@ -406,7 +412,7 @@ export function LiveStudioView({
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    disabled={uploading}
+                    disabled={uploading || generatingSample}
                     className="px-3 py-1.5 text-xs font-medium rounded-md bg-blue-600 hover:bg-blue-500 text-white flex items-center gap-1.5 disabled:opacity-50 whitespace-nowrap"
                   >
                     <Upload className="w-3.5 h-3.5" />
@@ -445,7 +451,7 @@ export function LiveStudioView({
                           <div className="text-sm font-medium text-slate-100 truncate">
                             {video.originalName}
                           </div>
-                          <div className="text-xs text-slate-400 font-mono tabular-nums mt-0.5">
+                          <div className="text-xs text-slate-400 font-mono tabular-nums mt-0.5 break-words">
                             {video.width}x{video.height} · {video.fps} fps · {formatDuration(video.durationSec)} · {formatBytes(video.sizeBytes)} · {video.videoCodec}{video.hasAudio ? `/${video.audioCodec}` : ' (no audio)'}
                           </div>
                         </button>
@@ -456,7 +462,7 @@ export function LiveStudioView({
                           <button
                             type="button"
                             onClick={() => handleDeleteVideo(video.id)}
-                            disabled={isStreamingOrConnecting && active}
+                            disabled={(isStreamingOrConnecting && active) || deletingVideoId === video.id}
                             aria-label={`Delete ${video.originalName}`}
                             className="p-1.5 rounded text-slate-400 hover:text-rose-400 hover:bg-[#1A2230] disabled:opacity-40"
                           >
@@ -482,7 +488,7 @@ export function LiveStudioView({
                   value={directUrlInput}
                   onChange={(e) => setDirectUrlInput(e.target.value)}
                   placeholder="https://cdn.example.com/authorized-broadcast.mp4"
-                  className="flex-1 bg-[#0B0E14] border border-[#263042] rounded-md px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
+                  className="flex-1 min-w-0 bg-[#0B0E14] border border-[#263042] rounded-md px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
                 />
                 <button
                   type="button"
@@ -510,7 +516,7 @@ export function LiveStudioView({
                   value={ytUrlInput}
                   onChange={(e) => setYtUrlInput(e.target.value)}
                   placeholder="https://www.youtube.com/watch?v=... or https://youtu.be/..."
-                  className="flex-1 bg-[#0B0E14] border border-[#263042] rounded-md px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
+                  className="flex-1 min-w-0 bg-[#0B0E14] border border-[#263042] rounded-md px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
                 />
                 <button
                   type="button"
@@ -531,7 +537,7 @@ export function LiveStudioView({
                   }`}
                 >
                   {youtubeResult.valid && youtubeResult.title && (
-                    <div className="font-semibold text-sm text-slate-100">
+                    <div className="font-semibold text-sm text-slate-100 break-words">
                       {youtubeResult.title} · {youtubeResult.authorName}
                     </div>
                   )}
@@ -552,14 +558,14 @@ export function LiveStudioView({
         </section>
 
         {/* Live FFmpeg & WebSocket Activity Logs */}
-        <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-5 space-y-3">
-          <div className="flex items-center justify-between">
+        <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-4 sm:p-5 space-y-3 min-w-0">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-base font-semibold text-slate-100">Broadcast Engine Activity Logs</h3>
             <span className="text-xs font-mono text-slate-400 tabular-nums">
               {logs.length} events · Stream key redacted
             </span>
           </div>
-          <div className="bg-[#080A0F] border border-[#232B3A] rounded-md p-3 h-56 overflow-y-auto font-mono text-xs space-y-1">
+          <div className="bg-[#080A0F] border border-[#232B3A] rounded-md p-3 h-56 overflow-y-auto overflow-x-hidden font-mono text-xs space-y-1">
             {logs.length === 0 ? (
               <div className="text-slate-500 py-4 text-center">
                 Waiting for broadcast engine events...
@@ -584,7 +590,7 @@ export function LiveStudioView({
                     [{entry.level}]
                   </span>
                   <span
-                    className={`break-all ${
+                    className={`break-all min-w-0 ${
                       entry.level === 'error'
                         ? 'text-rose-200'
                         : entry.level === 'warn'
@@ -601,20 +607,18 @@ export function LiveStudioView({
         </section>
       </div>
 
-      {/* Right 4 columns: Stream Controls, Encoding Quality, Facebook RTMP Settings */}
-      <div className="xl:col-span-4 space-y-5">
-        {/* Stream Controls Dock */}
-        <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-5 space-y-4">
+      {/* Right 4 columns */}
+      <div className="xl:col-span-4 space-y-5 min-w-0">
+        <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-4 sm:p-5 space-y-4 min-w-0">
           <h3 className="text-base font-semibold text-slate-100">Stream Controls</h3>
 
           {(actionError || telemetry.lastError) && (
             <div className="p-3 rounded-md bg-rose-950/35 border border-rose-500/40 text-xs text-rose-200 flex items-start gap-2">
               <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-              <span>{actionError || telemetry.lastError}</span>
+              <span className="break-words min-w-0">{actionError || telemetry.lastError}</span>
             </div>
           )}
 
-          {/* Quality Selection */}
           <div className="space-y-2">
             <label className="block text-xs font-medium text-slate-300">
               Output Quality Profile (H.264 / AAC / 30 FPS)
@@ -650,41 +654,39 @@ export function LiveStudioView({
           </div>
 
           {sourceType === 'uploaded' && (
-            <label className="flex items-center justify-between text-xs text-slate-300 py-1 cursor-pointer">
+            <label className="flex items-center justify-between text-xs text-slate-300 py-1 cursor-pointer gap-2">
               <span>Loop uploaded video continuously</span>
               <input
                 type="checkbox"
                 disabled={isStreamingOrConnecting}
                 checked={loopVideo}
                 onChange={(e) => setLoopVideo(e.target.checked)}
-                className="rounded border-[#2E384B] bg-[#0B0E14] text-blue-600 focus:ring-blue-500"
+                className="rounded border-[#2E384B] bg-[#0B0E14] text-blue-600 focus:ring-blue-500 shrink-0"
               />
             </label>
           )}
 
-          {/* Primary Broadcast Action Buttons */}
           <div className="grid grid-cols-2 gap-2.5 pt-1">
             <button
               type="button"
               onClick={handleStartLive}
-              disabled={isStreamingOrConnecting || streamBusyAction || sourceType === 'youtube-preview'}
-              className="px-4 py-2.5 rounded-md bg-blue-600 hover:bg-blue-500 disabled:bg-blue-600/40 disabled:text-slate-300 text-white text-sm font-semibold flex items-center justify-center gap-2 transition-colors whitespace-nowrap"
+              disabled={isStreamingOrConnecting || streamBusyAction !== null || sourceType === 'youtube-preview'}
+              className="px-3 sm:px-4 py-2.5 rounded-md bg-blue-600 hover:bg-blue-500 disabled:bg-blue-600/40 disabled:text-slate-300 text-white text-sm font-semibold flex items-center justify-center gap-2 transition-colors whitespace-nowrap"
             >
-              <Play className="w-4 h-4" />
-              <span>START LIVE</span>
+              <Play className="w-4 h-4 shrink-0" />
+              <span>{streamBusyAction === 'starting' ? 'STARTING...' : 'START LIVE'}</span>
             </button>
             <button
               type="button"
               onClick={handleStopLive}
-              disabled={!isStreamingOrConnecting || streamBusyAction}
-              className="px-4 py-2.5 rounded-md bg-rose-600 hover:bg-rose-500 disabled:bg-[#1B2230] disabled:text-slate-500 text-white text-sm font-semibold flex items-center justify-center gap-2 transition-colors whitespace-nowrap"
+              disabled={!isStreamingOrConnecting || streamBusyAction !== null}
+              className="px-3 sm:px-4 py-2.5 rounded-md bg-rose-600 hover:bg-rose-500 disabled:bg-[#1B2230] disabled:text-slate-500 text-white text-sm font-semibold flex items-center justify-center gap-2 transition-colors whitespace-nowrap"
             >
-              <Square className="w-4 h-4" />
-              <span>STOP LIVE</span>
+              <Square className="w-4 h-4 shrink-0" />
+              <span>{streamBusyAction === 'stopping' ? 'STOPPING...' : 'STOP LIVE'}</span>
             </button>
           </div>
 
-          {/* Local Dry-Run Encoding Pipeline Verifier */}
           <div className="pt-2 border-t border-[#232B3A] space-y-2.5">
             <button
               type="button"
@@ -692,8 +694,8 @@ export function LiveStudioView({
               disabled={pipelineChecking || isStreamingOrConnecting || sourceType === 'youtube-preview'}
               className="w-full px-3 py-2 rounded-md border border-[#2A3447] bg-[#181F2C] hover:bg-[#1F293B] text-slate-200 text-xs font-medium flex items-center justify-center gap-2 disabled:opacity-50 transition-colors"
             >
-              <Wrench className="w-3.5 h-3.5 text-blue-400" />
-              <span>
+              <Wrench className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+              <span className="truncate">
                 {pipelineChecking ? 'Running 2s FFmpeg Dry-Run...' : 'Verify Encoding Pipeline (Local Dry-Run)'}
               </span>
             </button>
@@ -709,7 +711,7 @@ export function LiveStudioView({
                 <div className="font-semibold">
                   {pipelineResult.success ? 'Dry-Run Encode Passed' : 'Dry-Run Encode Failed'}
                 </div>
-                <p>{pipelineResult.message}</p>
+                <p className="break-words">{pipelineResult.message}</p>
                 <div className="font-mono text-[11px] text-slate-300">
                   {pipelineResult.resolution} · {pipelineResult.videoCodec} · {pipelineResult.audioCodec}
                 </div>
@@ -718,12 +720,11 @@ export function LiveStudioView({
           </div>
         </section>
 
-        {/* Facebook RTMP Settings Dock */}
-        <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-5 space-y-4">
-          <div className="flex items-center justify-between">
+        <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-4 sm:p-5 space-y-4 min-w-0">
+          <div className="flex items-center justify-between gap-2">
             <h3 className="text-base font-semibold text-slate-100">Facebook RTMP Target</h3>
             <span
-              className={`text-xs font-medium ${
+              className={`text-xs font-medium shrink-0 ${
                 rtmpConfig.hasStreamKey ? 'text-emerald-400' : 'text-amber-400'
               }`}
             >
@@ -774,13 +775,13 @@ export function LiveStudioView({
                 </button>
               </div>
               <p className="text-[11px] text-slate-500 mt-1.5">
-                Saved AES-256-GCM encrypted on the server. Never stored in browser localStorage or exposed in logs.
+                Saved AES-256-GCM encrypted on the backend. Never stored in browser localStorage or exposed in logs.
               </p>
             </div>
 
             {rtmpFeedback && (
               <div
-                className={`text-xs p-2.5 rounded border ${
+                className={`text-xs p-2.5 rounded border break-words ${
                   rtmpFeedback.type === 'ok'
                     ? 'bg-emerald-950/25 border-emerald-500/35 text-emerald-200'
                     : 'bg-rose-950/25 border-rose-500/35 text-rose-200'
@@ -794,7 +795,7 @@ export function LiveStudioView({
               type="button"
               onClick={handleSaveRtmp}
               disabled={savingRtmp}
-              className="w-full px-4 py-2 rounded-md bg-[#181F2C] hover:bg-[#212B3D] border border-[#2C374C] text-slate-100 text-xs font-semibold transition-colors"
+              className="w-full px-4 py-2 rounded-md bg-[#181F2C] hover:bg-[#212B3D] border border-[#2C374C] text-slate-100 text-xs font-semibold transition-colors disabled:opacity-50"
             >
               {savingRtmp ? 'Encrypting & Saving...' : 'Save RTMP Credentials Securely'}
             </button>

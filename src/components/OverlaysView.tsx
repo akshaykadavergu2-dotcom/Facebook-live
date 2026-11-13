@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react';
-import { CheckCircle2, ImagePlus, Save, Trash2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { AlertTriangle, CheckCircle2, ImagePlus, Save, Trash2 } from 'lucide-react';
 import type {
   LogoPosition,
   OverlayConfig,
@@ -34,7 +34,12 @@ export function OverlaysView({
   const [draft, setDraft] = useState<OverlayConfig>(overlays);
   const [saving, setSaving] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [removingLogo, setRemovingLogo] = useState(false);
   const [statusMsg, setStatusMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+
+  useEffect(() => {
+    setDraft(overlays);
+  }, [overlays]);
 
   const updateField = <K extends keyof OverlayConfig>(key: K, value: OverlayConfig[K]) => {
     setDraft((prev) => ({ ...prev, [key]: value }));
@@ -49,7 +54,7 @@ export function OverlaysView({
       onOverlaysUpdated(saved);
       setStatusMsg({
         type: 'ok',
-        text: 'Overlays saved on server and ready for FFmpeg broadcast rendering.',
+        text: 'Overlays saved on backend and ready for FFmpeg broadcast rendering.',
       });
     } catch (err) {
       setStatusMsg({
@@ -82,26 +87,29 @@ export function OverlaysView({
   };
 
   const handleDeleteLogo = async () => {
+    setRemovingLogo(true);
     setStatusMsg(null);
     try {
       const updated = await api.deleteOverlayLogo();
       setDraft(updated);
       onOverlaysUpdated(updated);
+      setStatusMsg({ type: 'ok', text: 'Logo overlay removed.' });
     } catch (err) {
       setStatusMsg({
         type: 'err',
         text: err instanceof Error ? err.message : 'Failed to remove logo.',
       });
+    } finally {
+      setRemovingLogo(false);
     }
   };
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
-      {/* Live Overlay Preview Stage */}
-      <div className="xl:col-span-7 space-y-4">
-        <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-5 space-y-4">
+    <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start min-w-0">
+      <div className="xl:col-span-7 space-y-4 min-w-0">
+        <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-4 sm:p-5 space-y-4 min-w-0">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
+            <div className="min-w-0">
               <h2 className="text-base font-semibold text-slate-100">Live Graphics Preview Stage</h2>
               <p className="text-xs text-slate-400">
                 Changes preview immediately and burn into the FFmpeg output stream on next broadcast start.
@@ -136,20 +144,22 @@ export function OverlaysView({
                   : 'bg-rose-950/25 border-rose-500/35 text-rose-200'
               }`}
             >
-              <CheckCircle2 className="w-4 h-4 shrink-0" />
+              {statusMsg.type === 'ok' ? (
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+              ) : (
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+              )}
               <span>{statusMsg.text}</span>
             </div>
           )}
         </section>
       </div>
 
-      {/* Graphics Editors */}
-      <div className="xl:col-span-5 space-y-5">
-        {/* 1. Transparent PNG Logo Overlay */}
-        <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-5 space-y-4">
-          <div className="flex items-center justify-between">
+      <div className="xl:col-span-5 space-y-5 min-w-0">
+        <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-4 sm:p-5 space-y-4 min-w-0">
+          <div className="flex items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-slate-100">01. Corner Logo (Transparent PNG)</h3>
-            <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+            <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer shrink-0">
               <input
                 type="checkbox"
                 checked={draft.logoEnabled}
@@ -165,7 +175,7 @@ export function OverlaysView({
               type="button"
               onClick={() => logoInputRef.current?.click()}
               disabled={uploadingLogo}
-              className="px-3 py-2 rounded-md bg-[#181F2C] hover:bg-[#212B3D] border border-[#2C374C] text-xs font-medium text-slate-100 flex items-center gap-2"
+              className="px-3 py-2 rounded-md bg-[#181F2C] hover:bg-[#212B3D] border border-[#2C374C] text-xs font-medium text-slate-100 flex items-center gap-2 disabled:opacity-50"
             >
               <ImagePlus className="w-3.5 h-3.5 text-blue-400" />
               <span>{uploadingLogo ? 'Uploading PNG...' : 'Upload PNG Logo'}</span>
@@ -174,10 +184,11 @@ export function OverlaysView({
               <button
                 type="button"
                 onClick={handleDeleteLogo}
-                className="px-3 py-2 rounded-md border border-[#2C374C] text-xs text-rose-400 hover:bg-rose-950/30 flex items-center gap-1.5"
+                disabled={removingLogo}
+                className="px-3 py-2 rounded-md border border-[#2C374C] text-xs text-rose-400 hover:bg-rose-950/30 flex items-center gap-1.5 disabled:opacity-50"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>Remove</span>
+                <span>{removingLogo ? 'Removing...' : 'Remove'}</span>
               </button>
             )}
             <input
@@ -189,7 +200,7 @@ export function OverlaysView({
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-slate-400 mb-1">Corner Position</label>
               <select
@@ -232,11 +243,10 @@ export function OverlaysView({
           </div>
         </section>
 
-        {/* 2. Headline Text Overlay */}
-        <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-5 space-y-3">
-          <div className="flex items-center justify-between">
+        <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-4 sm:p-5 space-y-3 min-w-0">
+          <div className="flex items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-slate-100">02. Headline Banner</h3>
-            <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+            <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer shrink-0">
               <input
                 type="checkbox"
                 checked={draft.headlineEnabled}
@@ -318,11 +328,10 @@ export function OverlaysView({
           </div>
         </section>
 
-        {/* 3. Lower-Third News Graphics Editor */}
-        <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-5 space-y-3">
-          <div className="flex items-center justify-between">
+        <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-4 sm:p-5 space-y-3 min-w-0">
+          <div className="flex items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-slate-100">03. Lower-Third News Graphic</h3>
-            <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+            <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer shrink-0">
               <input
                 type="checkbox"
                 checked={draft.lowerThirdEnabled}
@@ -384,11 +393,10 @@ export function OverlaysView({
           </div>
         </section>
 
-        {/* 4. Scrolling News Ticker */}
-        <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-5 space-y-3">
-          <div className="flex items-center justify-between">
+        <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-4 sm:p-5 space-y-3 min-w-0">
+          <div className="flex items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-slate-100">04. Scrolling News Ticker</h3>
-            <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+            <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer shrink-0">
               <input
                 type="checkbox"
                 checked={draft.tickerEnabled}

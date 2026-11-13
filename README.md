@@ -2,86 +2,90 @@
 
 Production-ready broadcast control room for encoding and streaming authorized video sources and live graphics overlays to **Facebook Live** via **RTMPS / RTMP**.
 
-## Architecture
+## Architecture (Split Netlify Frontend + Persistent Node.js Backend)
 
-- **Frontend**: React 19 + TypeScript + Tailwind CSS v4 (OBS-inspired dark broadcast control room)
-- **Backend**: Node.js 22 + Express + WebSockets (`ws`) + Multer + Rate Limiting
-- **Stream Engine**: Real FFmpeg process management (`libx264` H.264 video @ 30 FPS, `aac` audio, 2-second keyframe interval `-g 60`, `1280x720` & `1920x1080` profiles, live `filter_complex` graphics overlays)
-- **Credential Security**: Facebook Stream Keys are encrypted at rest with **AES-256-GCM** on the server, never stored in `localStorage`, never returned to the browser in plaintext, and redacted from all logs.
+Because Netlify is a static/serverless host and **FFmpeg RTMP streaming requires a persistent stateful process**, production deployment uses a split architecture:
 
-## YouTube Compliance Policy
+1. **Frontend (Netlify — `https://streamkarolive.netlify.app`)**
+   - React 19 + TypeScript + Tailwind CSS v4 (built via `npm run build` -> `dist/`).
+   - Connects to the separate Node.js backend via `VITE_API_BASE_URL` for REST APIs, WebSocket telemetry (`/ws`), and preview media (`/media/*`).
+   - **No Netlify Functions are used for streaming.**
 
-LIVECAST STUDIO validates YouTube share URLs (`youtube.com/watch?v=...`, `youtu.be/...`, `youtube.com/live/...`) and loads them inside the official **YouTube IFrame Player API** for preview only. It intentionally does **not** scrape YouTube, bypass DRM, or extract protected streams into FFmpeg. To broadcast live via RTMP, use **Uploaded Authorized Video Files** (MP4, MOV, WebM, MKV) or **Authorized Direct Media URLs** (direct MP4 / HLS streams).
+2. **Backend (`/backend` — Render, Railway, Fly.io, or VPS)**
+   - Standalone Node.js 22 + Express + WebSockets (`ws`) + Multer + Rate Limiting + FFmpeg.
+   - Configured with CORS for `https://streamkarolive.netlify.app`.
+   - Encrypts Facebook Stream Keys at rest using **AES-256-GCM** (`CREDENTIAL_ENCRYPTION_KEY`), never exposes them in API responses or logs, and never stores them in browser `localStorage`.
 
 ---
 
-## Local Development Setup
+## Deploying the Backend (Render / Persistent Docker Host)
 
-### Prerequisites
-- **Node.js 22+**
-- **FFmpeg & FFprobe** installed on `PATH` (with `libx264`, `aac`, `libfreetype`, and `gnutls`/TLS support for `rtmps://`)
-  - Ubuntu/Debian: `sudo apt-get update && sudo apt-get install -y ffmpeg fonts-liberation`
-  - macOS: `brew install ffmpeg`
+1. Push this repository to GitHub/GitLab.
+2. In **Render**, click **New + -> Web Service** (or use **Blueprint** with `backend/render.yaml`).
+3. Configure the Render service:
+   - **Root Directory**: `backend`
+   - **Runtime / Environment**: `Docker` (uses `backend/Dockerfile` which installs Node 22, FFmpeg, and Liberation fonts)
+   - **Health Check Path**: `/api/health`
+   - **Persistent Disk** (recommended): Mount at `/app/.data` so encrypted credentials, stream history, and overlays survive redeploys.
+4. Set **Backend Environment Variables** in Render:
+   ```env
+   NODE_ENV=production
+   PORT=3000
+   ALLOWED_CORS_ORIGIN=https://streamkarolive.netlify.app
+   CREDENTIAL_ENCRYPTION_KEY=<run: openssl rand -hex 32>
+   SESSION_SECRET=<run: openssl rand -hex 32>
+   STUDIO_ADMIN_PASSWORD=<optional strong operator password>
+   MAX_UPLOAD_MB=500
+   ```
+5. Deploy and verify `https://<your-render-service>.onrender.com/api/health` returns JSON `{"ok": true, ...}`.
 
-### Run Locally
-1. Copy `.env.example` to `.env` and set secrets:
-   ```bash
-   cp .env.example .env
-   ```
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Start the full-stack development server (Express + WebSocket + Vite):
-   ```bash
-   npm run dev
-   ```
-4. Open `http://localhost:3000`.
+*(You can also run `/backend` on any Ubuntu/Docker VPS via `docker build -t livecast-backend ./backend && docker run -d -p 3000:3000 --env-file ./backend/.env livecast-backend`.)*
 
-### Production Build & Run (Without Docker)
+---
+
+## Configuring Netlify Frontend (`streamkarolive.netlify.app`)
+
+1. Open **Netlify Dashboard -> Site configuration -> Environment variables**.
+2. Add **one** frontend environment variable (do NOT put secrets or stream keys here):
+   - **Key**: `VITE_API_BASE_URL`
+   - **Value**: `https://<your-render-service>.onrender.com` *(no trailing slash)*
+3. Verify Netlify Build settings (`netlify.toml` is included):
+   - **Build command**: `npm run build`
+   - **Publish directory**: `dist`
+4. Trigger **Deploys -> Trigger deploy -> Clear cache and deploy site** so Vite bakes `VITE_API_BASE_URL` into the bundle.
+
+---
+
+## Local Development (Unified Server)
+
 ```bash
-npm run build
-NODE_ENV=production npm start
+cp .env.example .env
+npm install
+npm run dev
 ```
+Open `http://localhost:3000` (runs Express + WebSockets + Vite middleware on a single port).
 
 ---
 
-## Docker & VPS Deployment Guide
+## API Endpoints Reference
 
-> **Important**: Never run FFmpeg inside serverless functions (Vercel, Netlify Functions, AWS Lambda) due to execution time limits, CPU throttling, and lack of persistent process control. Deploy LIVECAST STUDIO on a dedicated VPS or container host (e.g., DigitalOcean, Hetzner, AWS EC2, Railway, Fly.io, Google Cloud Run with min-instances/always-on CPU or Compute Engine).
-
-### Recommended VPS Specs
-- **720p30 stream**: Minimum 2 vCPU, 2 GB RAM, >= 10 Mbps sustained upload bandwidth
-- **1080p30 stream**: Minimum 4 vCPU, 4 GB RAM, >= 15 Mbps sustained upload bandwidth
-
-### Deploy with Docker Compose
-1. Generate strong secrets:
-   ```bash
-   export CREDENTIAL_ENCRYPTION_KEY=$(openssl rand -hex 32)
-   export SESSION_SECRET=$(openssl rand -hex 32)
-   export STUDIO_ADMIN_PASSWORD="your-strong-operator-password"
-   ```
-2. Build and start:
-   ```bash
-   docker compose up -d --build
-   ```
-3. Place a TLS reverse proxy (Caddy or Nginx) in front of port `3000` with WebSocket upgrade headers (`Upgrade` and `Connection: upgrade`) enabled for `/ws`.
-
-### Facebook Live RTMP Setup
-1. Open **Facebook Live Producer** -> **Streaming Software**.
-2. Copy the **Server URL** (usually `rtmps://live-api-s.facebook.com:443/rtmp/`) and **Stream Key**.
-3. Paste both in LIVECAST STUDIO (**Settings** or **Live Studio -> Facebook RTMP Target**) and click **Save Credentials**.
-4. Select an uploaded MP4 (or click **Generate Sample MP4** to test immediately), verify overlays, and click **START LIVE**.
-
----
-
-## API Reference
-
-- `POST /api/stream/start` — Start FFmpeg RTMP broadcast (prevents duplicate active streams)
-- `POST /api/stream/stop` — Gracefully stop active FFmpeg process
+- `GET /api/health` — Returns backend health, FFmpeg availability, and stream state
 - `GET /api/stream/status` — Current telemetry and sanitized FFmpeg logs
-- `POST /api/stream/validate-pipeline` — Run a 2-second local FFmpeg dry-run encode with overlays
-- `POST /api/video/upload` — Upload and probe authorized video file (MP4/MOV/WebM/MKV)
-- `POST /api/overlays` — Save overlay configuration (headline, lower-third, scrolling ticker, PNG logo placement)
-- `POST /api/overlays/logo` — Upload transparent PNG logo
+- `GET /api/stream/credentials` / `POST /api/stream/credentials` / `DELETE /api/stream/credentials` — Manage AES-256-GCM encrypted Facebook RTMP URL & Stream Key (masked in responses; `/api/rtmp/config` alias also supported)
+- `POST /api/stream/start` — Start FFmpeg H.264/AAC RTMP broadcast
+- `POST /api/stream/stop` — Gracefully stop active FFmpeg process
+- `POST /api/stream/validate-pipeline` — 2-second local FFmpeg dry-run encode check
+- `POST /api/video/upload` — Upload & probe authorized MP4/MOV/WebM/MKV video
+- `POST /api/overlays` & `POST /api/overlays/logo` — Configure overlays and transparent PNG corner logo
 - `WS /ws` — Real-time stream status, FPS/bitrate telemetry, and sanitized logs
+
+---
+
+## Deployment Verification Checklist
+
+- [ ] Backend `/api/health` returns HTTP `200` JSON with `"ok": true` and `"ffmpegAvailable": true`
+- [ ] Backend `ALLOWED_CORS_ORIGIN` includes `https://streamkarolive.netlify.app`
+- [ ] Netlify `VITE_API_BASE_URL` is set to the Render/VPS backend HTTPS URL and site is rebuilt
+- [ ] Missing backend routes (e.g. `/api/nonexistent`) return HTTP `404` JSON instead of HTML
+- [ ] Saving Facebook RTMP credentials via `POST /api/stream/credentials` returns `200` JSON with `maskedStreamKey` and never exposes the raw key
+- [ ] Mobile layout (375px width) has zero horizontal scrollbars

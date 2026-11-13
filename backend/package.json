@@ -1,0 +1,30 @@
+{
+  "name": "livecast-studio-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Persistent Node.js + Express + FFmpeg + WebSocket streaming backend for LIVECAST STUDIO",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "dev": "tsx watch server.ts",
+    "start": "node server.ts",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "express": "^4.21.2",
+    "express-rate-limit": "^8.7.4",
+    "multer": "^2.5.0",
+    "ws": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/multer": "^2.3.0",
+    "@types/node": "^22.14.0",
+    "@types/ws": "^8.18.2",
+    "tsx": "^4.21.0",
+    "typescript": "^5.8.2"
+  }
+}

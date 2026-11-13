@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { History, Search, Trash2 } from 'lucide-react';
+import { AlertTriangle, History, Search, Trash2 } from 'lucide-react';
 import type { StreamHistoryEntry } from '../../shared/types';
 import { formatDuration } from '../lib/api';
 
@@ -12,6 +12,7 @@ export function HistoryView({ history, onClearHistory }: HistoryViewProps) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'Stopped' | 'Completed' | 'Error'>('ALL');
   const [clearing, setClearing] = useState(false);
+  const [clearError, setClearError] = useState<string | null>(null);
 
   const filtered = history.filter((item) => {
     const matchesStatus = statusFilter === 'ALL' || item.status === statusFilter;
@@ -25,16 +26,19 @@ export function HistoryView({ history, onClearHistory }: HistoryViewProps) {
 
   const handleClear = async () => {
     setClearing(true);
+    setClearError(null);
     try {
       await onClearHistory();
+    } catch (err) {
+      setClearError(err instanceof Error ? err.message : 'Failed to clear history.');
     } finally {
       setClearing(false);
     }
   };
 
   return (
-    <div className="space-y-5">
-      <div className="bg-[#121721] border border-[#232B3A] rounded-lg p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div className="space-y-5 min-w-0">
+      <div className="bg-[#121721] border border-[#232B3A] rounded-lg p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 min-w-0">
         <div>
           <h2 className="text-base font-semibold text-slate-100">Stream Session History</h2>
           <p className="text-xs text-slate-400 mt-0.5">
@@ -42,19 +46,19 @@ export function HistoryView({ history, onClearHistory }: HistoryViewProps) {
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative">
+        <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+          <div className="relative w-full sm:w-56">
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Filter source or error..."
-              className="bg-[#0B0E14] border border-[#263042] rounded-md pl-8 pr-3 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
+              className="w-full bg-[#0B0E14] border border-[#263042] rounded-md pl-8 pr-3 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
             />
           </div>
 
-          <div className="inline-flex p-0.5 bg-[#0B0E14] border border-[#232B3A] rounded-md">
+          <div className="flex flex-wrap p-0.5 bg-[#0B0E14] border border-[#232B3A] rounded-md">
             {(['ALL', 'Stopped', 'Completed', 'Error'] as const).map((tab) => (
               <button
                 key={tab}
@@ -76,7 +80,7 @@ export function HistoryView({ history, onClearHistory }: HistoryViewProps) {
               type="button"
               onClick={handleClear}
               disabled={clearing}
-              className="px-3 py-1.5 text-xs font-medium rounded-md border border-[#2C374C] text-slate-300 hover:text-rose-300 hover:border-rose-500/40 flex items-center gap-1.5"
+              className="px-3 py-1.5 text-xs font-medium rounded-md border border-[#2C374C] text-slate-300 hover:text-rose-300 hover:border-rose-500/40 flex items-center gap-1.5 disabled:opacity-50"
             >
               <Trash2 className="w-3.5 h-3.5" />
               <span>{clearing ? 'Clearing...' : 'Clear Log'}</span>
@@ -85,7 +89,14 @@ export function HistoryView({ history, onClearHistory }: HistoryViewProps) {
         </div>
       </div>
 
-      <div className="bg-[#121721] border border-[#232B3A] rounded-lg overflow-hidden">
+      {clearError && (
+        <div className="p-3 rounded-md bg-rose-950/35 border border-rose-500/40 text-xs text-rose-200 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+          <span>{clearError}</span>
+        </div>
+      )}
+
+      <div className="bg-[#121721] border border-[#232B3A] rounded-lg overflow-hidden min-w-0">
         {filtered.length === 0 ? (
           <div className="py-14 px-6 text-center">
             <History className="w-8 h-8 text-slate-500 mx-auto mb-2.5" />
@@ -97,7 +108,7 @@ export function HistoryView({ history, onClearHistory }: HistoryViewProps) {
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto max-w-full">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b border-[#232B3A] bg-[#0E131B] text-[11px] font-medium text-slate-400">

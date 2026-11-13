@@ -1,4 +1,5 @@
-import { ArrowRight, CheckCircle2, AlertCircle, Film, KeyRound, Radio, ShieldCheck } from 'lucide-react';
+import { useState } from 'react';
+import { ArrowRight, CheckCircle2, AlertCircle, Film, KeyRound, Radio, ShieldCheck, AlertTriangle } from 'lucide-react';
 import type {
   OverlayConfig,
   RtmpPublicConfig,
@@ -33,6 +34,8 @@ export function DashboardView({
   onGenerateSample,
   generatingSample,
 }: DashboardViewProps) {
+  const [sampleError, setSampleError] = useState<string | null>(null);
+
   const activeOverlaysCount = [
     overlays.logoEnabled && overlays.logoUrl,
     overlays.headlineEnabled,
@@ -40,13 +43,22 @@ export function DashboardView({
     overlays.tickerEnabled,
   ].filter(Boolean).length;
 
+  const handleSampleClick = async () => {
+    setSampleError(null);
+    try {
+      await onGenerateSample();
+    } catch (err) {
+      setSampleError(err instanceof Error ? err.message : 'Failed to generate sample MP4.');
+    }
+  };
+
   const readinessItems = [
     {
       label: 'FFmpeg Encoding Engine',
       ready: Boolean(security?.ffmpegAvailable),
       detail: security?.ffmpegAvailable
-        ? 'H.264 / AAC / RTMPS pipeline detected on host'
-        : 'FFmpeg binary missing on host',
+        ? 'H.264 / AAC / RTMPS pipeline detected on backend host'
+        : 'Backend FFmpeg engine unavailable or backend not connected',
       actionLabel: 'Check Settings',
       target: 'settings' as NavSection,
     },
@@ -72,10 +84,9 @@ export function DashboardView({
   ];
 
   return (
-    <div className="space-y-6">
-      {/* Primary Overview Strip */}
-      <div className="bg-[#121721] border border-[#232B3A] rounded-lg p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="space-y-1">
+    <div className="space-y-6 min-w-0">
+      <div className="bg-[#121721] border border-[#232B3A] rounded-lg p-4 sm:p-6 flex flex-col md:flex-row md:items-center justify-between gap-4 min-w-0">
+        <div className="space-y-1 min-w-0">
           <h2 className="text-xl font-semibold text-slate-100">Broadcast Control Overview</h2>
           <p className="text-sm text-slate-400 max-w-2xl">
             Prepare authorized media files or direct streams, compose real-time graphics overlays, and encode directly to Facebook Live via RTMPS.
@@ -84,7 +95,7 @@ export function DashboardView({
         <div className="flex flex-wrap items-center gap-3 shrink-0">
           <button
             type="button"
-            onClick={onGenerateSample}
+            onClick={handleSampleClick}
             disabled={generatingSample}
             className="px-4 py-2 text-sm font-medium rounded-md border border-[#2A3447] bg-[#181F2C] text-slate-200 hover:bg-[#1E2738] disabled:opacity-50 transition-colors whitespace-nowrap"
           >
@@ -102,9 +113,15 @@ export function DashboardView({
         </div>
       </div>
 
-      {/* 4-Column Telemetry Summary Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        <div className="bg-[#121721] border border-[#232B3A] rounded-lg p-5">
+      {sampleError && (
+        <div className="p-3 rounded-md bg-rose-950/35 border border-rose-500/40 text-xs text-rose-200 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+          <span>{sampleError}</span>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 min-w-0">
+        <div className="bg-[#121721] border border-[#232B3A] rounded-lg p-5 min-w-0">
           <div className="text-xs font-medium text-slate-400">Broadcast Status</div>
           <div className="mt-2 flex items-center gap-2">
             <span
@@ -126,7 +143,7 @@ export function DashboardView({
           </div>
         </div>
 
-        <div className="bg-[#121721] border border-[#232B3A] rounded-lg p-5">
+        <div className="bg-[#121721] border border-[#232B3A] rounded-lg p-5 min-w-0">
           <div className="text-xs font-medium text-slate-400">Authorized Media Library</div>
           <div className="mt-2 text-lg font-semibold text-slate-100 font-mono tabular-nums">
             {videos.length} {videos.length === 1 ? 'File' : 'Files'}
@@ -136,7 +153,7 @@ export function DashboardView({
           </div>
         </div>
 
-        <div className="bg-[#121721] border border-[#232B3A] rounded-lg p-5">
+        <div className="bg-[#121721] border border-[#232B3A] rounded-lg p-5 min-w-0">
           <div className="text-xs font-medium text-slate-400">Active Graphics Overlays</div>
           <div className="mt-2 text-lg font-semibold text-slate-100 font-mono tabular-nums">
             {activeOverlaysCount} / 4 Enabled
@@ -146,7 +163,7 @@ export function DashboardView({
           </div>
         </div>
 
-        <div className="bg-[#121721] border border-[#232B3A] rounded-lg p-5">
+        <div className="bg-[#121721] border border-[#232B3A] rounded-lg p-5 min-w-0">
           <div className="text-xs font-medium text-slate-400">Recorded Sessions</div>
           <div className="mt-2 text-lg font-semibold text-slate-100 font-mono tabular-nums">
             {history.length}
@@ -157,26 +174,25 @@ export function DashboardView({
         </div>
       </div>
 
-      {/* Two-Column Readiness & Recent History */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
-        <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-6 flex flex-col justify-between">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch min-w-0">
+        <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-5 sm:p-6 flex flex-col justify-between min-w-0">
           <div>
             <div className="flex items-center justify-between pb-4 border-b border-[#232B3A]">
               <h3 className="text-base font-semibold text-slate-100">Pre-Flight Broadcast Checklist</h3>
-              <ShieldCheck className="w-4 h-4 text-blue-400" />
+              <ShieldCheck className="w-4 h-4 text-blue-400 shrink-0" />
             </div>
             <div className="divide-y divide-[#232B3A]">
               {readinessItems.map((item) => (
                 <div key={item.label} className="py-4 flex items-start justify-between gap-4">
-                  <div className="flex items-start gap-3">
+                  <div className="flex items-start gap-3 min-w-0">
                     {item.ready ? (
                       <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
                     ) : (
                       <AlertCircle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
                     )}
-                    <div>
+                    <div className="min-w-0">
                       <div className="text-sm font-medium text-slate-100">{item.label}</div>
-                      <div className="text-xs text-slate-400 mt-0.5">{item.detail}</div>
+                      <div className="text-xs text-slate-400 mt-0.5 break-words">{item.detail}</div>
                     </div>
                   </div>
                   <button
@@ -191,10 +207,10 @@ export function DashboardView({
             </div>
           </div>
 
-          <div className="pt-4 border-t border-[#232B3A] flex items-center justify-between text-xs text-slate-400">
+          <div className="pt-4 border-t border-[#232B3A] flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
             <span className="flex items-center gap-1.5">
-              <KeyRound className="w-3.5 h-3.5 text-slate-400" />
-              <span>Stream keys are AES-256-GCM encrypted on the server</span>
+              <KeyRound className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              <span>Stream keys are AES-256-GCM encrypted on the backend</span>
             </span>
             <button
               type="button"
@@ -206,7 +222,7 @@ export function DashboardView({
           </div>
         </section>
 
-        <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-6 flex flex-col">
+        <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-5 sm:p-6 flex flex-col min-w-0">
           <div className="flex items-center justify-between pb-4 border-b border-[#232B3A]">
             <h3 className="text-base font-semibold text-slate-100">Recent Broadcast Sessions</h3>
             <button
@@ -234,7 +250,7 @@ export function DashboardView({
                     <div className="text-sm font-medium text-slate-200 truncate">
                       {entry.sourceLabel}
                     </div>
-                    <div className="text-xs text-slate-400 mt-0.5 font-mono tabular-nums">
+                    <div className="text-xs text-slate-400 mt-0.5 font-mono tabular-nums truncate">
                       {new Date(entry.startedAt).toLocaleString()} · {entry.outputResolution}
                     </div>
                   </div>

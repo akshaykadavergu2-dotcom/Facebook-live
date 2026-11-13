@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CheckCircle2, Eye, EyeOff, KeyRound, Lock, Server, ShieldAlert, Terminal } from 'lucide-react';
 import type { RtmpPublicConfig, SecurityStatusInfo } from '../../shared/types';
-import { api } from '../lib/api';
+import { api, API_BASE_URL } from '../lib/api';
 
 interface SettingsViewProps {
   rtmpConfig: RtmpPublicConfig;
@@ -16,6 +16,10 @@ export function SettingsView({ rtmpConfig, security, onRtmpUpdated }: SettingsVi
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
+  useEffect(() => {
+    setServerUrl(rtmpConfig.serverUrl);
+  }, [rtmpConfig.serverUrl]);
+
   const handleSave = async () => {
     setSaving(true);
     setFeedback(null);
@@ -26,7 +30,7 @@ export function SettingsView({ rtmpConfig, security, onRtmpUpdated }: SettingsVi
       setShowKey(false);
       setFeedback({
         type: 'ok',
-        text: 'Facebook RTMP settings saved and AES-256-GCM encrypted on the server.',
+        text: 'Facebook RTMP settings saved and AES-256-GCM encrypted on the backend.',
       });
     } catch (err) {
       setFeedback({
@@ -44,7 +48,7 @@ export function SettingsView({ rtmpConfig, security, onRtmpUpdated }: SettingsVi
     try {
       const updated = await api.clearRtmpKey();
       onRtmpUpdated(updated);
-      setFeedback({ type: 'ok', text: 'Stored Stream Key deleted from server.' });
+      setFeedback({ type: 'ok', text: 'Stored Stream Key deleted from backend.' });
     } catch (err) {
       setFeedback({
         type: 'err',
@@ -56,12 +60,12 @@ export function SettingsView({ rtmpConfig, security, onRtmpUpdated }: SettingsVi
   };
 
   return (
-    <div className="space-y-6 max-w-5xl">
+    <div className="space-y-6 max-w-5xl min-w-0">
       {/* Facebook RTMP Configuration */}
-      <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-6 space-y-4">
-        <div className="flex items-center justify-between pb-3 border-b border-[#232B3A]">
+      <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-4 sm:p-6 space-y-4 min-w-0">
+        <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[#232B3A]">
           <div className="flex items-center gap-2.5">
-            <KeyRound className="w-4 h-4 text-blue-400" />
+            <KeyRound className="w-4 h-4 text-blue-400 shrink-0" />
             <h2 className="text-base font-semibold text-slate-100">Facebook Live RTMP Credentials</h2>
           </div>
           <span className="text-xs font-mono text-slate-400">
@@ -70,7 +74,7 @@ export function SettingsView({ rtmpConfig, security, onRtmpUpdated }: SettingsVi
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
+          <div className="min-w-0">
             <label htmlFor="settings-rtmp-url" className="block text-xs font-medium text-slate-300 mb-1.5">
               Facebook RTMP Server URL
             </label>
@@ -84,9 +88,9 @@ export function SettingsView({ rtmpConfig, security, onRtmpUpdated }: SettingsVi
             />
           </div>
 
-          <div>
+          <div className="min-w-0">
             <label htmlFor="settings-rtmp-key" className="block text-xs font-medium text-slate-300 mb-1.5">
-              Facebook Stream Key (Server-Encrypted)
+              Facebook Stream Key (Backend-Encrypted)
             </label>
             <div className="relative">
               <input
@@ -116,7 +120,7 @@ export function SettingsView({ rtmpConfig, security, onRtmpUpdated }: SettingsVi
 
         {feedback && (
           <div
-            className={`p-3 rounded-md border text-xs ${
+            className={`p-3 rounded-md border text-xs break-words ${
               feedback.type === 'ok'
                 ? 'bg-emerald-950/25 border-emerald-500/35 text-emerald-200'
                 : 'bg-rose-950/25 border-rose-500/35 text-rose-200'
@@ -140,7 +144,7 @@ export function SettingsView({ rtmpConfig, security, onRtmpUpdated }: SettingsVi
               type="button"
               onClick={handleClearKey}
               disabled={saving}
-              className="px-4 py-2 rounded-md border border-[#2C374C] text-xs font-medium text-rose-300 hover:bg-rose-950/30"
+              className="px-4 py-2 rounded-md border border-[#2C374C] text-xs font-medium text-rose-300 hover:bg-rose-950/30 disabled:opacity-50"
             >
               Clear Stored Key
             </button>
@@ -149,91 +153,97 @@ export function SettingsView({ rtmpConfig, security, onRtmpUpdated }: SettingsVi
       </section>
 
       {/* Security & Production Posture */}
-      <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-6 space-y-4">
+      <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-4 sm:p-6 space-y-4 min-w-0">
         <div className="flex items-center gap-2.5 pb-3 border-b border-[#232B3A]">
-          <Lock className="w-4 h-4 text-blue-400" />
-          <h2 className="text-base font-semibold text-slate-100">Security Posture & Runtime Diagnostics</h2>
+          <Lock className="w-4 h-4 text-blue-400 shrink-0" />
+          <h2 className="text-base font-semibold text-slate-100">Security Posture & Backend Connection</h2>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-          <div className="bg-[#0E131B] border border-[#232B3A] rounded-md p-4 space-y-1.5">
-            <div className="flex items-center justify-between">
+          <div className="bg-[#0E131B] border border-[#232B3A] rounded-md p-4 space-y-1.5 min-w-0">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-medium text-slate-200">Backend API Endpoint</span>
+              <span className="text-blue-400 font-mono truncate">
+                {API_BASE_URL || 'Same-Origin (/api)'}
+              </span>
+            </div>
+            <p className="text-slate-400 leading-relaxed">
+              On Netlify (<code className="font-mono text-slate-300">streamkarolive.netlify.app</code>), set <code className="font-mono text-slate-300">VITE_API_BASE_URL</code> in Netlify Site Environment Variables to your Render/VPS backend URL. Never put secrets in <code className="font-mono text-slate-300">VITE_*</code> variables.
+            </p>
+          </div>
+
+          <div className="bg-[#0E131B] border border-[#232B3A] rounded-md p-4 space-y-1.5 min-w-0">
+            <div className="flex items-center justify-between gap-2">
               <span className="font-medium text-slate-200">Operator Authentication</span>
               {security?.authRequired ? (
-                <span className="text-emerald-400 flex items-center gap-1">
+                <span className="text-emerald-400 flex items-center gap-1 shrink-0">
                   <CheckCircle2 className="w-3.5 h-3.5" /> Enabled
                 </span>
               ) : (
-                <span className="text-amber-400 flex items-center gap-1">
-                  <ShieldAlert className="w-3.5 h-3.5" /> Disabled (Local Mode)
+                <span className="text-amber-400 flex items-center gap-1 shrink-0">
+                  <ShieldAlert className="w-3.5 h-3.5" /> Local Mode
                 </span>
               )}
             </div>
             <p className="text-slate-400 leading-relaxed">
-              Set <code className="font-mono text-slate-300">STUDIO_ADMIN_PASSWORD</code> in your environment before deploying to a public VPS to require HMAC-signed cookie auth on all API and WebSocket routes.
+              Set <code className="font-mono text-slate-300">STUDIO_ADMIN_PASSWORD</code> on the backend host to require HMAC-signed cookie authentication.
             </p>
           </div>
 
-          <div className="bg-[#0E131B] border border-[#232B3A] rounded-md p-4 space-y-1.5">
-            <div className="flex items-center justify-between">
+          <div className="bg-[#0E131B] border border-[#232B3A] rounded-md p-4 space-y-1.5 min-w-0">
+            <div className="flex items-center justify-between gap-2">
               <span className="font-medium text-slate-200">Credential Encryption Key</span>
               {security?.encryptionConfigured ? (
-                <span className="text-emerald-400 flex items-center gap-1">
+                <span className="text-emerald-400 flex items-center gap-1 shrink-0">
                   <CheckCircle2 className="w-3.5 h-3.5" /> Env Configured
                 </span>
               ) : (
-                <span className="text-slate-300">Auto-Generated Master Key</span>
+                <span className="text-slate-300 shrink-0">Auto-Generated Master Key</span>
               )}
             </div>
             <p className="text-slate-400 leading-relaxed">
-              Provide <code className="font-mono text-slate-300">CREDENTIAL_ENCRYPTION_KEY</code> in production so encrypted RTMP keys remain portable across container rebuilds.
+              Provide <code className="font-mono text-slate-300">CREDENTIAL_ENCRYPTION_KEY</code> on the backend so AES-256-GCM encrypted RTMP keys persist across container redeploys.
             </p>
           </div>
 
-          <div className="bg-[#0E131B] border border-[#232B3A] rounded-md p-4 space-y-1.5">
-            <div className="flex items-center justify-between">
+          <div className="bg-[#0E131B] border border-[#232B3A] rounded-md p-4 space-y-1.5 min-w-0">
+            <div className="flex items-center justify-between gap-2">
               <span className="font-medium text-slate-200">FFmpeg Runtime</span>
-              <span className={security?.ffmpegAvailable ? 'text-emerald-400' : 'text-rose-400'}>
-                {security?.ffmpegAvailable ? 'Installed' : 'Not Found'}
+              <span className={security?.ffmpegAvailable ? 'text-emerald-400 shrink-0' : 'text-rose-400 shrink-0'}>
+                {security?.ffmpegAvailable ? 'Installed' : 'Not Connected'}
               </span>
             </div>
             <p className="text-slate-400 font-mono text-[11px] truncate">
-              {security?.ffmpegVersion || 'Install ffmpeg and fonts-liberation on host'}
-            </p>
-          </div>
-
-          <div className="bg-[#0E131B] border border-[#232B3A] rounded-md p-4 space-y-1.5">
-            <div className="flex items-center justify-between">
-              <span className="font-medium text-slate-200">API Rate Limiting & Upload Guard</span>
-              <span className="text-emerald-400">Active</span>
-            </div>
-            <p className="text-slate-400 leading-relaxed">
-              Max upload size <span className="font-mono text-slate-300">{security?.maxUploadMb ?? 500} MB</span> · MP4/MOV/WebM/MKV & PNG magic-byte verification enabled.
+              {security?.ffmpegVersion || 'FFmpeg runs exclusively on the Node.js backend host'}
             </p>
           </div>
         </div>
       </section>
 
-      {/* Docker & VPS Deployment Instructions */}
-      <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-6 space-y-4">
+      {/* Split Netlify + Render Deployment Instructions */}
+      <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-4 sm:p-6 space-y-4 min-w-0">
         <div className="flex items-center gap-2.5 pb-3 border-b border-[#232B3A]">
-          <Server className="w-4 h-4 text-blue-400" />
-          <h2 className="text-base font-semibold text-slate-100">Docker & VPS Deployment Guide</h2>
+          <Server className="w-4 h-4 text-blue-400 shrink-0" />
+          <h2 className="text-base font-semibold text-slate-100">Netlify Frontend + Render Backend Deployment</h2>
         </div>
 
         <p className="text-xs text-slate-300 leading-relaxed">
-          FFmpeg RTMP encoding is a long-running, CPU-intensive stateful process. Deploy LIVECAST STUDIO on a VPS or persistent container host (minimum 2 vCPU / 2 GB RAM for 720p30, 4 vCPU / 4 GB RAM for 1080p30) rather than serverless functions.
+          Netlify serves only the static React UI. Deploy the <code className="font-mono text-slate-200">/backend</code> folder as a persistent Docker Web Service on Render (or Railway/VPS) with FFmpeg installed, then connect Netlify via <code className="font-mono text-slate-200">VITE_API_BASE_URL</code>.
         </p>
 
-        <div className="bg-[#080A0F] border border-[#232B3A] rounded-md p-4 font-mono text-xs text-slate-300 space-y-2 overflow-x-auto">
+        <div className="bg-[#080A0F] border border-[#232B3A] rounded-md p-4 font-mono text-xs text-slate-300 space-y-2 overflow-x-auto max-w-full">
           <div className="flex items-center gap-2 text-slate-400 pb-1 border-b border-[#232B3A]">
-            <Terminal className="w-3.5 h-3.5" />
-            <span>Deploy with Docker Compose</span>
+            <Terminal className="w-3.5 h-3.5 shrink-0" />
+            <span>1. Render Backend Env Vars · 2. Netlify Frontend Env Var</span>
           </div>
-          <pre className="leading-relaxed">{`export CREDENTIAL_ENCRYPTION_KEY=$(openssl rand -hex 32)
-export SESSION_SECRET=$(openssl rand -hex 32)
-export STUDIO_ADMIN_PASSWORD="choose-a-strong-password"
-docker compose up -d --build`}</pre>
+          <pre className="leading-relaxed whitespace-pre-wrap break-words sm:whitespace-pre">{`# Render Web Service (Root Directory: backend, Runtime: Docker)
+PORT=3000
+ALLOWED_CORS_ORIGIN=https://streamkarolive.netlify.app
+CREDENTIAL_ENCRYPTION_KEY=<openssl rand -hex 32>
+SESSION_SECRET=<openssl rand -hex 32>
+
+# Netlify Site Environment Variables (streamkarolive.netlify.app)
+VITE_API_BASE_URL=https://your-livecast-backend.onrender.com`}</pre>
         </div>
       </section>
     </div>

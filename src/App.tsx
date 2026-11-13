@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { LogOut, Menu, Radio, Wifi, WifiOff } from 'lucide-react';
+import { AlertTriangle, LogOut, Menu, Radio, RefreshCw, Wifi, WifiOff } from 'lucide-react';
 import type {
   OverlayConfig,
   RtmpPublicConfig,
@@ -11,7 +11,7 @@ import type {
   VideoSourceType,
   YouTubeValidationResult,
 } from '../shared/types';
-import { api, formatDuration } from './lib/api';
+import { api, API_BASE_URL, formatDuration, getWebSocketUrl } from './lib/api';
 import { AuthGateModal } from './components/AuthGateModal';
 import { DashboardView } from './components/DashboardView';
 import { HistoryView } from './components/HistoryView';
@@ -81,6 +81,8 @@ export default function App() {
 
   const [security, setSecurity] = useState<SecurityStatusInfo | null>(null);
   const [bootLoading, setBootLoading] = useState(true);
+  const [backendError, setBackendError] = useState<string | null>(null);
+  const [retryingConnection, setRetryingConnection] = useState(false);
 
   const [telemetry, setTelemetry] = useState<StreamTelemetry>(INITIAL_TELEMETRY);
   const [logs, setLogs] = useState<StreamLogEntry[]>([]);
@@ -104,46 +106,74 @@ export default function App() {
   const wsRef = useRef<WebSocket | null>(null);
 
   const loadStudioData = useCallback(async () => {
-    const [authRes, statusRes, rtmpRes, videosRes, overlaysRes, historyRes] = await Promise.all([
-      api.getAuthStatus(),
-      api.getStreamStatus().catch(() => null),
-      api.getRtmpConfig().catch(() => null),
-      api.getVideos().catch(() => null),
-      api.getOverlays().catch(() => null),
-      api.getHistory().catch(() => null),
-    ]);
+    setBackendError(null);
+    try {
+      const authRes = await api.getAuthStatus();
+      setSecurity(authRes);
 
-    setSecurity(authRes);
-    if (statusRes) {
+      if (authRes.authRequired && !authRes.authenticated) {
+        return;
+      }
+
+      const [statusRes, rtmpRes, videosRes, overlaysRes, historyRes] = await Promise.all([
+        api.getStreamStatus(),
+        api.getRtmpConfig(),
+        api.getVideos(),
+        api.getOverlays(),
+        api.getHistory(),
+      ]);
+
       setTelemetry(statusRes.telemetry);
       setLogs(statusRes.logs);
-    }
-    if (rtmpRes) setRtmpConfig(rtmpRes);
-    if (videosRes) {
+      setRtmpConfig(rtmpRes);
       setVideos(videosRes.videos);
       if (videosRes.videos.length > 0) {
         setSelectedVideoId((prev) => prev ?? videosRes.videos[0].id);
       }
+      setOverlays(overlaysRes);
+      setHistory(historyRes.history);
+    } catch (err) {
+      const isNetlifyMissingBase =
+        !API_BASE_URL && window.location.hostname.endsWith('.netlify.app');
+      setBackendError(
+        isNetlifyMissingBase
+          ? 'VITE_API_BASE_URL is not configured for this Netlify deployment. Set VITE_API_BASE_URL to your Render backend URL in Netlify Environment Variables and redeploy.'
+          : err instanceof Error
+            ? err.message
+            : 'Unable to connect to the LIVECAST STUDIO backend server.',
+      );
     }
-    if (overlaysRes) setOverlays(overlaysRes);
-    if (historyRes) setHistory(historyRes.history);
   }, []);
 
   useEffect(() => {
     loadStudioData().finally(() => setBootLoading(false));
   }, [loadStudioData]);
 
-  // WebSocket live telemetry & logs connection with automatic reconnect
+  const handleRetryConnection = async () => {
+    setRetryingConnection(true);
+    try {
+      await loadStudioData();
+    } finally {
+      setRetryingConnection(false);
+    }
+  };
+
   useEffect(() => {
     if (bootLoading) return;
+    if (backendError) return;
     if (security?.authRequired && !security.authenticated) return;
 
     let closedByCleanup = false;
     let reconnectTimer: number | null = null;
 
     const connect = () => {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+      let ws: WebSocket;
+      try {
+        ws = new WebSocket(getWebSocketUrl());
+      } catch {
+        setWsConnected(false);
+        return;
+      }
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -183,12 +213,12 @@ export default function App() {
       ws.onclose = () => {
         setWsConnected(false);
         if (!closedByCleanup) {
-          reconnectTimer = window.setTimeout(connect, 2500);
+          reconnectTimer = window.setTimeout(connect, 3000);
         }
       };
 
       ws.onerror = () => {
-        ws.close();
+        setWsConnected(false);
       };
     };
 
@@ -202,7 +232,7 @@ export default function App() {
         wsRef.current = null;
       }
     };
-  }, [bootLoading, security?.authRequired, security?.authenticated]);
+  }, [bootLoading, backendError, security?.authRequired, security?.authenticated]);
 
   const handleGenerateSample = async () => {
     setGeneratingSample(true);
@@ -229,8 +259,11 @@ export default function App() {
 
   if (bootLoading) {
     return (
-      <div className="min-h-screen bg-[#0B0E14] flex items-center justify-center text-sm text-slate-400">
-        Initializing LIVECAST STUDIO...
+      <div className="min-h-screen bg-[#0B0E14] flex flex-col items-center justify-center gap-2 text-sm text-slate-400 px-4 text-center">
+        <span>Connecting to LIVECAST STUDIO backend...</span>
+        {API_BASE_URL && (
+          <span className="text-xs font-mono text-slate-500 break-all">{API_BASE_URL}</span>
+        )}
       </div>
     );
   }
@@ -248,7 +281,7 @@ export default function App() {
   const selectedVideo = videos.find((v) => v.id === selectedVideoId) ?? videos[0] ?? null;
 
   return (
-    <div className="min-h-screen h-screen bg-[#0B0E14] text-slate-100 flex overflow-hidden">
+    <div className="min-h-screen h-screen bg-[#0B0E14] text-slate-100 flex overflow-hidden w-full max-w-full">
       <Sidebar
         activeSection={section}
         onSelect={setSection}
@@ -258,14 +291,13 @@ export default function App() {
       />
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* Top Broadcast Header */}
-        <header className="h-14 px-4 lg:px-6 border-b border-[#232B3A] bg-[#0E131B] flex items-center justify-between gap-4 shrink-0">
-          <div className="flex items-center gap-3 min-w-0">
+        <header className="h-14 px-3 sm:px-4 lg:px-6 border-b border-[#232B3A] bg-[#0E131B] flex items-center justify-between gap-3 shrink-0 min-w-0">
+          <div className="flex items-center gap-2.5 min-w-0">
             <button
               type="button"
               onClick={() => setMobileMenuOpen(true)}
               aria-label="Open navigation"
-              className="lg:hidden p-2 rounded-md text-slate-300 hover:bg-[#181F2C]"
+              className="lg:hidden p-2 rounded-md text-slate-300 hover:bg-[#181F2C] shrink-0"
             >
               <Menu className="w-4 h-4" />
             </button>
@@ -274,8 +306,7 @@ export default function App() {
             </h1>
           </div>
 
-          <div className="flex items-center gap-4 shrink-0">
-            {/* Live Telemetry & WebSocket Readout */}
+          <div className="flex items-center gap-3 sm:gap-4 shrink-0">
             <div className="hidden sm:flex items-center gap-3 text-xs font-mono tabular-nums text-slate-300">
               <span
                 className={`flex items-center gap-1.5 font-semibold ${
@@ -303,7 +334,7 @@ export default function App() {
                 ) : (
                   <>
                     <WifiOff className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Reconnecting</span>
+                    <span>Offline</span>
                   </>
                 )}
               </span>
@@ -313,7 +344,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setSection('studio')}
-                className="px-3.5 py-1.5 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold whitespace-nowrap shrink-0"
+                className="px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold whitespace-nowrap shrink-0"
               >
                 Live Studio
               </button>
@@ -332,8 +363,28 @@ export default function App() {
           </div>
         </header>
 
-        {/* Scrollable Workspace Viewport */}
-        <main className="flex-1 overflow-y-auto p-4 lg:p-6">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-4 lg:p-6 min-w-0">
+          {backendError && (
+            <div className="mb-5 bg-rose-950/35 border border-rose-500/40 rounded-lg p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-2.5 min-w-0">
+                <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                <div className="text-xs text-rose-100 space-y-1 min-w-0">
+                  <div className="font-semibold text-sm text-rose-200">Backend API Connection Issue</div>
+                  <p className="break-words">{backendError}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleRetryConnection}
+                disabled={retryingConnection}
+                className="px-3.5 py-2 rounded-md bg-[#181F2C] hover:bg-[#232C3E] border border-[#2E394E] text-xs font-medium text-slate-100 flex items-center gap-1.5 shrink-0 disabled:opacity-50 self-start sm:self-center"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${retryingConnection ? 'animate-spin' : ''}`} />
+                <span>{retryingConnection ? 'Retrying...' : 'Retry Connection'}</span>
+              </button>
+            </div>
+          )}
+
           {section === 'dashboard' && (
             <DashboardView
               telemetry={telemetry}

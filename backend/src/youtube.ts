@@ -69,7 +69,7 @@ export async function validateYouTubeUrl(rawUrl: string): Promise<YouTubeValidat
       authorName = data.author_name;
     }
   } catch {
-    // oEmbed is optional metadata enrichment; embedded player still loads when permitted
+    // oEmbed is optional metadata enrichment
   }
 
   return {
