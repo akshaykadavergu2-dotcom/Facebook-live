@@ -1,0 +1,6 @@
+{
+  "name": "LIVECAST STUDIO",
+  "description": "Production-ready broadcast control room for encoding and streaming authorized video sources and live graphics overlays to Facebook Live via RTMP.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,26 @@
+services:
+  livecast-studio:
+    build: .
+    container_name: livecast-studio
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      CREDENTIAL_ENCRYPTION_KEY: "${CREDENTIAL_ENCRYPTION_KEY:-change_me_to_64_hex_chars}"
+      STUDIO_ADMIN_PASSWORD: "${STUDIO_ADMIN_PASSWORD:-}"
+      SESSION_SECRET: "${SESSION_SECRET:-change_me_session_hmac}"
+      MAX_UPLOAD_MB: "${MAX_UPLOAD_MB:-500}"
+    volumes:
+      - livecast_data:/app/.data
+      - livecast_uploads:/app/uploads
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+
+volumes:
+  livecast_data:
+  livecast_uploads:
