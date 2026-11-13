@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle2, Eye, EyeOff, KeyRound, Lock, Server, ShieldAlert, Terminal } from 'lucide-react';
+import { CheckCircle2, Eye, EyeOff, KeyRound, Lock, Server, ShieldCheck, Terminal } from 'lucide-react';
 import type { RtmpPublicConfig, SecurityStatusInfo } from '../../shared/types';
 import { api, API_BASE_URL } from '../lib/api';
 
@@ -174,19 +174,14 @@ export function SettingsView({ rtmpConfig, security, onRtmpUpdated }: SettingsVi
 
           <div className="bg-[#0E131B] border border-[#232B3A] rounded-md p-4 space-y-1.5 min-w-0">
             <div className="flex items-center justify-between gap-2">
-              <span className="font-medium text-slate-200">Operator Authentication</span>
-              {security?.authRequired ? (
-                <span className="text-emerald-400 flex items-center gap-1 shrink-0">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Enabled
-                </span>
-              ) : (
-                <span className="text-amber-400 flex items-center gap-1 shrink-0">
-                  <ShieldAlert className="w-3.5 h-3.5" /> Local Mode
-                </span>
-              )}
+              <span className="font-medium text-slate-200">Stream Control Protection</span>
+              <span className="text-emerald-400 flex items-center gap-1 shrink-0">
+                <ShieldCheck className="w-3.5 h-3.5" />{' '}
+                {security?.originProtectionEnabled !== false ? 'Origin-Locked' : 'Active'}
+              </span>
             </div>
             <p className="text-slate-400 leading-relaxed">
-              Set <code className="font-mono text-slate-300">STUDIO_ADMIN_PASSWORD</code> on the backend host to require HMAC-signed cookie authentication.
+              Backend stream control and WebSocket upgrades validate allowed CORS origins (<code className="font-mono text-slate-300">ALLOWED_CORS_ORIGIN</code>), client request headers, and rate limits without blocking dashboard access.
             </p>
           </div>
 
@@ -237,13 +232,13 @@ export function SettingsView({ rtmpConfig, security, onRtmpUpdated }: SettingsVi
             <span>1. Render Backend Env Vars · 2. Netlify Frontend Env Var</span>
           </div>
           <pre className="leading-relaxed whitespace-pre-wrap break-words sm:whitespace-pre">{`# Render Web Service (Root Directory: backend, Runtime: Docker)
+NODE_ENV=production
 PORT=3000
 ALLOWED_CORS_ORIGIN=https://streamkarolive.netlify.app
 CREDENTIAL_ENCRYPTION_KEY=<openssl rand -hex 32>
-SESSION_SECRET=<openssl rand -hex 32>
 
 # Netlify Site Environment Variables (streamkarolive.netlify.app)
-VITE_API_BASE_URL=https://your-livecast-backend.onrender.com`}</pre>
+VITE_API_BASE_URL=https://facebook-live-gvx5.onrender.com`}</pre>
         </div>
       </section>
     </div>

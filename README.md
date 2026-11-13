@@ -33,11 +33,9 @@ Because Netlify is a static/serverless host and **FFmpeg RTMP streaming requires
    PORT=3000
    ALLOWED_CORS_ORIGIN=https://streamkarolive.netlify.app
    CREDENTIAL_ENCRYPTION_KEY=<run: openssl rand -hex 32>
-   SESSION_SECRET=<run: openssl rand -hex 32>
-   STUDIO_ADMIN_PASSWORD=<optional strong operator password>
    MAX_UPLOAD_MB=500
    ```
-5. Deploy and verify `https://<your-render-service>.onrender.com/api/health` returns JSON `{"ok": true, ...}`.
+5. Deploy and verify `https://facebook-live-gvx5.onrender.com/api/health` returns JSON `{"ok": true, ...}`.
 
 *(You can also run `/backend` on any Ubuntu/Docker VPS via `docker build -t livecast-backend ./backend && docker run -d -p 3000:3000 --env-file ./backend/.env livecast-backend`.)*
 
@@ -48,7 +46,7 @@ Because Netlify is a static/serverless host and **FFmpeg RTMP streaming requires
 1. Open **Netlify Dashboard -> Site configuration -> Environment variables**.
 2. Add **one** frontend environment variable (do NOT put secrets or stream keys here):
    - **Key**: `VITE_API_BASE_URL`
-   - **Value**: `https://<your-render-service>.onrender.com` *(no trailing slash)*
+   - **Value**: `https://facebook-live-gvx5.onrender.com` *(no trailing slash)*
 3. Verify Netlify Build settings (`netlify.toml` is included):
    - **Build command**: `npm run build`
    - **Publish directory**: `dist`

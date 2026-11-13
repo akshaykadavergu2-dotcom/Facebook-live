@@ -1,118 +1,170 @@
 import crypto from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
 
-const COOKIE_NAME = 'livecast_session';
+const DEFAULT_ALLOWED_ORIGINS = [
+  'https://streamkarolive.netlify.app',
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:5173',
+];
 
-export function isAuthEnabled(): boolean {
-  const pw = process.env.STUDIO_ADMIN_PASSWORD?.trim();
-  return Boolean(pw && pw.length > 0);
-}
+export function getAllowedOrigins(): Set<string> {
+  const allowed = new Set<string>(DEFAULT_ALLOWED_ORIGINS);
+  const rawList = [
+    process.env.ALLOWED_CORS_ORIGIN || '',
+    process.env.FRONTEND_ORIGIN || '',
+    process.env.APP_URL || '',
+  ]
+    .join(',')
+    .split(',')
+    .map((s) => s.trim().replace(/\/+$/, ''))
+    .filter(Boolean);
 
-function getSessionSecret(): string {
-  const configured = process.env.SESSION_SECRET?.trim();
-  if (configured && configured !== 'replace_with_session_hmac_secret') {
-    return configured;
+  for (const origin of rawList) {
+    allowed.add(origin);
   }
-  const fallback = process.env.STUDIO_ADMIN_PASSWORD?.trim() || 'local-dev-session-fallback';
-  return crypto.createHash('sha256').update(fallback).digest('hex');
+  return allowed;
 }
 
-export function signSessionToken(issuedAtMs: number): string {
-  const payload = String(issuedAtMs);
-  const sig = crypto
-    .createHmac('sha256', getSessionSecret())
-    .update(payload)
-    .digest('hex');
-  return `${payload}.${sig}`;
-}
-
-export function verifySessionToken(token: string | undefined): boolean {
-  if (!token) return false;
-  const parts = token.split('.');
-  if (parts.length !== 2) return false;
-  const [issuedStr, sig] = parts;
-  const issuedAt = Number(issuedStr);
-  if (!Number.isFinite(issuedAt)) return false;
-  if (Date.now() - issuedAt > 24 * 60 * 60 * 1000) return false;
-  const expected = crypto
-    .createHmac('sha256', getSessionSecret())
-    .update(issuedStr)
-    .digest('hex');
-  if (sig.length !== expected.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
-}
-
-export function parseCookies(cookieHeader: string | undefined): Record<string, string> {
-  const result: Record<string, string> = {};
-  if (!cookieHeader) return result;
-  for (const part of cookieHeader.split(';')) {
-    const idx = part.indexOf('=');
-    if (idx === -1) continue;
-    const key = part.slice(0, idx).trim();
-    const val = decodeURIComponent(part.slice(idx + 1).trim());
-    result[key] = val;
-  }
-  return result;
-}
-
-export function isRequestAuthenticated(req: Request): boolean {
-  if (!isAuthEnabled()) return true;
-  const cookies = parseCookies(req.headers.cookie);
-  if (verifySessionToken(cookies[COOKIE_NAME])) {
+export function isOriginAllowed(
+  origin: string | undefined,
+  hostHeader: string | undefined,
+  forwardedHostHeader?: string | string[],
+): boolean {
+  if (!origin) return true;
+  const normalized = origin.trim().replace(/\/+$/, '');
+  const allowed = getAllowedOrigins();
+  if (allowed.has('*') || allowed.has(normalized)) {
     return true;
   }
-  const bearer = req.headers.authorization;
-  if (bearer && bearer.startsWith('Bearer ')) {
-    const token = bearer.slice(7).trim();
-    const expected = process.env.STUDIO_ADMIN_PASSWORD?.trim() || '';
-    if (
-      token.length === expected.length &&
-      crypto.timingSafeEqual(Buffer.from(token), Buffer.from(expected))
-    ) {
+  if (/^https:\/\/[a-z0-9-]+--streamkarolive\.netlify\.app$/i.test(normalized)) {
+    return true;
+  }
+
+  const hosts = [
+    hostHeader,
+    Array.isArray(forwardedHostHeader) ? forwardedHostHeader[0] : forwardedHostHeader,
+  ].filter(Boolean) as string[];
+
+  for (const h of hosts) {
+    const cleanHost = h.split(',')[0].trim();
+    if (normalized === `https://${cleanHost}` || normalized === `http://${cleanHost}`) {
       return true;
     }
   }
   return false;
 }
 
-export function requireStudioAuth(req: Request, res: Response, next: NextFunction): void {
-  if (isRequestAuthenticated(req)) {
+function hasValidBackendAccessToken(req: Request): boolean {
+  const expected = process.env.BACKEND_ACCESS_TOKEN?.trim();
+  if (!expected) return false;
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return false;
+  const candidate = authHeader.slice(7).trim();
+  if (candidate.length !== expected.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(candidate), Buffer.from(expected));
+}
+
+function isLoopbackIp(ip: string | undefined): boolean {
+  if (!ip) return false;
+  return (
+    ip === '127.0.0.1' ||
+    ip === '::1' ||
+    ip === '::ffff:127.0.0.1' ||
+    ip.startsWith('127.')
+  );
+}
+
+function extractRefererOrigin(referer: string | undefined): string | undefined {
+  if (!referer) return undefined;
+  try {
+    return new URL(referer).origin;
+  } catch {
+    return undefined;
+  }
+}
+
+export function requireAllowedOrigin(req: Request, res: Response, next: NextFunction): void {
+  const origin = req.headers.origin;
+  if (origin && !isOriginAllowed(origin, req.headers.host, req.headers['x-forwarded-host'])) {
+    res.status(403).json({
+      error: 'Origin not allowed by backend security policy.',
+    });
+    return;
+  }
+
+  const secFetchSite = req.headers['sec-fetch-site'];
+  if (!origin && secFetchSite === 'cross-site') {
+    const refererOrigin = extractRefererOrigin(req.headers.referer);
+    if (!refererOrigin || !isOriginAllowed(refererOrigin, req.headers.host, req.headers['x-forwarded-host'])) {
+      res.status(403).json({
+        error: 'Cross-site request blocked by backend security policy.',
+      });
+      return;
+    }
+  }
+
+  next();
+}
+
+export function requireControlAccess(req: Request, res: Response, next: NextFunction): void {
+  if (hasValidBackendAccessToken(req)) {
     next();
     return;
   }
-  res.status(401).json({
-    error: 'Authentication required. Sign in with your Studio Operator password.',
+
+  const origin = req.headers.origin;
+  const clientHeader = req.headers['x-livecast-client'];
+  const hasClientHeader =
+    typeof clientHeader === 'string' && clientHeader.trim() === 'livecast-web';
+
+  if (origin) {
+    if (!isOriginAllowed(origin, req.headers.host, req.headers['x-forwarded-host'])) {
+      res.status(403).json({
+        error: 'Origin not allowed to control streaming operations.',
+      });
+      return;
+    }
+    if (!hasClientHeader) {
+      res.status(403).json({
+        error: 'Missing required studio client header for streaming control.',
+      });
+      return;
+    }
+    next();
+    return;
+  }
+
+  const secFetchSite = req.headers['sec-fetch-site'];
+  if (secFetchSite === 'cross-site') {
+    res.status(403).json({
+      error: 'Cross-site control request rejected.',
+    });
+    return;
+  }
+
+  if (secFetchSite === 'same-origin' && hasClientHeader) {
+    next();
+    return;
+  }
+
+  const refererOrigin = extractRefererOrigin(req.headers.referer);
+  if (
+    refererOrigin &&
+    isOriginAllowed(refererOrigin, req.headers.host, req.headers['x-forwarded-host']) &&
+    hasClientHeader
+  ) {
+    next();
+    return;
+  }
+
+  if (process.env.NODE_ENV !== 'production' || isLoopbackIp(req.ip)) {
+    next();
+    return;
+  }
+
+  res.status(403).json({
+    error: 'Direct unverified control requests are blocked in production. Use the authorized studio frontend.',
   });
-}
-
-export function setSessionCookie(res: Response, req: Request): void {
-  const token = signSessionToken(Date.now());
-  const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
-  const isCrossOrigin = Boolean(req.headers.origin);
-  const useNone = isHttps && isCrossOrigin;
-
-  res.cookie(COOKIE_NAME, token, {
-    httpOnly: true,
-    sameSite: useNone ? 'none' : 'lax',
-    secure: isHttps || process.env.NODE_ENV === 'production',
-    maxAge: 24 * 60 * 60 * 1000,
-    path: '/',
-  });
-}
-
-export function clearSessionCookie(res: Response, req: Request): void {
-  const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
-  const isCrossOrigin = Boolean(req.headers.origin);
-  res.clearCookie(COOKIE_NAME, {
-    path: '/',
-    sameSite: isHttps && isCrossOrigin ? 'none' : 'lax',
-    secure: isHttps || process.env.NODE_ENV === 'production',
-  });
-}
-
-export function verifyOperatorPassword(candidate: string): boolean {
-  const expected = process.env.STUDIO_ADMIN_PASSWORD?.trim() || '';
-  if (!expected) return true;
-  if (candidate.length !== expected.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(candidate), Buffer.from(expected));
 }

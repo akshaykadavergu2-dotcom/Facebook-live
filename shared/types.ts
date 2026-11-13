@@ -130,6 +130,7 @@ export interface PipelineCheckResult {
 export interface SecurityStatusInfo {
   authRequired: boolean;
   authenticated: boolean;
+  originProtectionEnabled: boolean;
   encryptionConfigured: boolean;
   rateLimitEnabled: boolean;
   ffmpegAvailable: boolean;

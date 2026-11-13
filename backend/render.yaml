@@ -13,8 +13,6 @@ services:
         value: https://streamkarolive.netlify.app
       - key: CREDENTIAL_ENCRYPTION_KEY
         generateValue: true
-      - key: SESSION_SECRET
-        generateValue: true
       - key: MAX_UPLOAD_MB
         value: "500"
     disk:

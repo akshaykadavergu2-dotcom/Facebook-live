@@ -12,14 +12,9 @@ import type {
   VideoSourceType,
 } from '../shared/types.ts';
 import {
-  clearSessionCookie,
-  isAuthEnabled,
-  isRequestAuthenticated,
-  parseCookies,
-  requireStudioAuth,
-  setSessionCookie,
-  verifyOperatorPassword,
-  verifySessionToken,
+  isOriginAllowed,
+  requireAllowedOrigin,
+  requireControlAccess,
 } from './auth.ts';
 import { isEnvEncryptionKeySet } from './crypto.ts';
 import {
@@ -49,60 +44,6 @@ import {
   VIDEOS_DIR,
 } from './storage.ts';
 import { validateYouTubeUrl } from './youtube.ts';
-
-const DEFAULT_ALLOWED_ORIGINS = [
-  'https://streamkarolive.netlify.app',
-  'http://localhost:3000',
-  'http://localhost:5173',
-  'http://127.0.0.1:3000',
-  'http://127.0.0.1:5173',
-];
-
-function getAllowedOrigins(): Set<string> {
-  const allowed = new Set<string>(DEFAULT_ALLOWED_ORIGINS);
-  const rawList = [
-    process.env.ALLOWED_CORS_ORIGIN || '',
-    process.env.FRONTEND_ORIGIN || '',
-    process.env.APP_URL || '',
-  ]
-    .join(',')
-    .split(',')
-    .map((s) => s.trim().replace(/\/+$/, ''))
-    .filter(Boolean);
-
-  for (const origin of rawList) {
-    allowed.add(origin);
-  }
-  return allowed;
-}
-
-function isOriginAllowed(
-  origin: string | undefined,
-  hostHeader: string | undefined,
-  forwardedHostHeader?: string | string[],
-): boolean {
-  if (!origin) return true;
-  const normalized = origin.trim().replace(/\/+$/, '');
-  const allowed = getAllowedOrigins();
-  if (allowed.has('*') || allowed.has(normalized)) {
-    return true;
-  }
-  if (/^https:\/\/[a-z0-9-]+--streamkarolive\.netlify\.app$/i.test(normalized)) {
-    return true;
-  }
-  const hosts = [
-    hostHeader,
-    Array.isArray(forwardedHostHeader) ? forwardedHostHeader[0] : forwardedHostHeader,
-  ].filter(Boolean) as string[];
-
-  for (const h of hosts) {
-    const cleanHost = h.split(',')[0].trim();
-    if (normalized === `https://${cleanHost}` || normalized === `http://${cleanHost}`) {
-      return true;
-    }
-  }
-  return false;
-}
 
 function isValidPngSignature(filePath: string): boolean {
   try {
@@ -172,12 +113,15 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
     if (origin && isOriginAllowed(origin, req.headers.host, req.headers['x-forwarded-host'])) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Vary', 'Origin');
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Livecast-Client');
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     }
 
     if (req.method === 'OPTIONS') {
+      if (origin && !isOriginAllowed(origin, req.headers.host, req.headers['x-forwarded-host'])) {
+        res.sendStatus(403);
+        return;
+      }
       res.sendStatus(204);
       return;
     }
@@ -211,20 +155,12 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
     message: { error: 'Stream control rate limit exceeded. Wait before retrying.' },
   });
 
-  const authLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 20,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: 'Too many authentication attempts. Try again later.' },
-  });
-
   app.use('/api', apiLimiter);
 
-  // Allow cross-origin video/image preview from Netlify frontend
+  // Allow cross-origin video/image preview from authorized Netlify frontend
   app.use(
     '/media/videos',
-    requireStudioAuth,
+    requireAllowedOrigin,
     express.static(VIDEOS_DIR, {
       acceptRanges: true,
       setHeaders: (res) => {
@@ -236,7 +172,7 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
 
   app.use(
     '/media/overlays',
-    requireStudioAuth,
+    requireAllowedOrigin,
     express.static(OVERLAYS_DIR, {
       setHeaders: (res) => {
         res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -309,48 +245,33 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
     });
   });
 
-  // Auth endpoints
-  app.get('/api/auth/status', async (req, res) => {
+  // Security & runtime posture endpoints (no password login required)
+  const handleSecurityStatus = async (_req: Request, res: Response) => {
     const ff = await checkFfmpegAvailability();
     res.json({
-      authRequired: isAuthEnabled(),
-      authenticated: isRequestAuthenticated(req),
+      authRequired: false,
+      authenticated: true,
+      originProtectionEnabled: true,
       encryptionConfigured: isEnvEncryptionKeySet(),
       rateLimitEnabled: true,
       ffmpegAvailable: ff.available,
       ffmpegVersion: ff.version,
       maxUploadMb: MAX_UPLOAD_MB,
     });
-  });
+  };
 
-  app.post('/api/auth/login', authLimiter, (req, res) => {
-    if (!isAuthEnabled()) {
-      res.json({ authenticated: true, authRequired: false });
-      return;
-    }
-    const password = typeof req.body?.password === 'string' ? req.body.password : '';
-    if (!verifyOperatorPassword(password)) {
-      res.status(401).json({ error: 'Invalid studio operator password.' });
-      return;
-    }
-    setSessionCookie(res, req);
-    res.json({ authenticated: true, authRequired: true });
-  });
-
-  app.post('/api/auth/logout', (req, res) => {
-    clearSessionCookie(res, req);
-    res.json({ authenticated: false });
-  });
+  app.get('/api/security/status', requireAllowedOrigin, handleSecurityStatus);
+  app.get('/api/auth/status', requireAllowedOrigin, handleSecurityStatus);
 
   // Stream status & controls
-  app.get('/api/stream/status', requireStudioAuth, (_req, res) => {
+  app.get('/api/stream/status', requireAllowedOrigin, (_req, res) => {
     res.json({
       telemetry: streamManager.getTelemetry(),
       logs: streamManager.getLogs(),
     });
   });
 
-  app.post('/api/stream/start', requireStudioAuth, streamControlLimiter, async (req, res) => {
+  app.post('/api/stream/start', requireControlAccess, streamControlLimiter, async (req, res) => {
     if (streamManager.isBusy()) {
       res.status(409).json({
         error: 'A live stream is already connecting or active. Stop the current stream before starting another.',
@@ -451,12 +372,12 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
     }
   });
 
-  app.post('/api/stream/stop', requireStudioAuth, streamControlLimiter, async (_req, res) => {
+  app.post('/api/stream/stop', requireControlAccess, streamControlLimiter, async (_req, res) => {
     const telemetry = await streamManager.stopStream();
     res.json({ telemetry });
   });
 
-  app.post('/api/stream/validate-pipeline', requireStudioAuth, streamControlLimiter, async (req, res) => {
+  app.post('/api/stream/validate-pipeline', requireControlAccess, streamControlLimiter, async (req, res) => {
     const body = (req.body ?? {}) as {
       sourceType?: VideoSourceType;
       videoId?: string;
@@ -537,20 +458,20 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
     res.json(clearStreamKey());
   };
 
-  app.get('/api/stream/credentials', requireStudioAuth, handleGetCredentials);
-  app.post('/api/stream/credentials', requireStudioAuth, handleSaveCredentials);
-  app.delete('/api/stream/credentials', requireStudioAuth, handleDeleteCredentials);
+  app.get('/api/stream/credentials', requireAllowedOrigin, handleGetCredentials);
+  app.post('/api/stream/credentials', requireControlAccess, streamControlLimiter, handleSaveCredentials);
+  app.delete('/api/stream/credentials', requireControlAccess, streamControlLimiter, handleDeleteCredentials);
 
-  app.get('/api/rtmp/config', requireStudioAuth, handleGetCredentials);
-  app.post('/api/rtmp/config', requireStudioAuth, handleSaveCredentials);
-  app.delete('/api/rtmp/key', requireStudioAuth, handleDeleteCredentials);
+  app.get('/api/rtmp/config', requireAllowedOrigin, handleGetCredentials);
+  app.post('/api/rtmp/config', requireControlAccess, streamControlLimiter, handleSaveCredentials);
+  app.delete('/api/rtmp/key', requireControlAccess, streamControlLimiter, handleDeleteCredentials);
 
   // Videos & URL validation
-  app.get('/api/videos', requireStudioAuth, (_req, res) => {
+  app.get('/api/videos', requireAllowedOrigin, (_req, res) => {
     res.json({ videos: getVideos() });
   });
 
-  app.post('/api/video/upload', requireStudioAuth, (req, res) => {
+  app.post('/api/video/upload', requireControlAccess, (req, res) => {
     videoUpload.single('video')(req, res, async (uploadErr: unknown) => {
       if (uploadErr) {
         const msg = uploadErr instanceof Error ? uploadErr.message : 'Video upload failed.';
@@ -593,7 +514,7 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
     });
   });
 
-  app.post('/api/videos/generate-sample', requireStudioAuth, async (_req, res) => {
+  app.post('/api/videos/generate-sample', requireControlAccess, async (_req, res) => {
     try {
       const filename = `sample_broadcast_${Date.now()}.mp4`;
       const targetPath = path.join(VIDEOS_DIR, filename);
@@ -626,7 +547,7 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
     }
   });
 
-  app.delete('/api/videos/:id', requireStudioAuth, (req, res) => {
+  app.delete('/api/videos/:id', requireControlAccess, (req, res) => {
     const id = String(req.params.id);
     const removed = removeVideo(id);
     if (!removed) {
@@ -636,7 +557,7 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
     res.json({ videos: getVideos() });
   });
 
-  app.post('/api/videos/validate-youtube', requireStudioAuth, async (req, res) => {
+  app.post('/api/videos/validate-youtube', requireControlAccess, async (req, res) => {
     const url = typeof req.body?.url === 'string' ? req.body.url : '';
     const result = await validateYouTubeUrl(url);
     if (!result.valid) {
@@ -646,7 +567,7 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
     res.json(result);
   });
 
-  app.post('/api/videos/validate-direct-url', requireStudioAuth, async (req, res) => {
+  app.post('/api/videos/validate-direct-url', requireControlAccess, async (req, res) => {
     const url = typeof req.body?.url === 'string' ? req.body.url : '';
     const check = validateDirectMediaUrl(url);
     if (!check.valid || !check.normalized) {
@@ -669,18 +590,18 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
   });
 
   // Overlays
-  app.get('/api/overlays', requireStudioAuth, (_req, res) => {
+  app.get('/api/overlays', requireAllowedOrigin, (_req, res) => {
     res.json(getOverlayConfig());
   });
 
-  app.post('/api/overlays', requireStudioAuth, (req, res) => {
+  app.post('/api/overlays', requireControlAccess, (req, res) => {
     const incoming = (req.body ?? {}) as Partial<OverlayConfig>;
     const { logoPath: _ignoredPath, logoUrl: _ignoredUrl, ...safeFields } = incoming;
     const updated = saveOverlayConfig(safeFields);
     res.json(updated);
   });
 
-  app.post('/api/overlays/logo', requireStudioAuth, (req, res) => {
+  app.post('/api/overlays/logo', requireControlAccess, (req, res) => {
     logoUpload.single('logo')(req, res, (uploadErr: unknown) => {
       if (uploadErr) {
         res.status(400).json({ error: uploadErr instanceof Error ? uploadErr.message : 'Logo upload failed.' });
@@ -714,7 +635,7 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
     });
   });
 
-  app.delete('/api/overlays/logo', requireStudioAuth, (_req, res) => {
+  app.delete('/api/overlays/logo', requireControlAccess, (_req, res) => {
     const current = getOverlayConfig();
     if (current.logoPath && fs.existsSync(current.logoPath)) {
       try {
@@ -732,11 +653,11 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
   });
 
   // History
-  app.get('/api/history', requireStudioAuth, (_req, res) => {
+  app.get('/api/history', requireAllowedOrigin, (_req, res) => {
     res.json({ history: getStreamHistory() });
   });
 
-  app.delete('/api/history', requireStudioAuth, (_req, res) => {
+  app.delete('/api/history', requireControlAccess, (_req, res) => {
     clearStreamHistory();
     res.json({ history: [] });
   });
@@ -804,19 +725,16 @@ export function attachWebSocketServer(server: http.Server): WebSocketServer {
       return;
     }
 
-    if (!isOriginAllowed(request.headers.origin, request.headers.host, request.headers['x-forwarded-host'])) {
+    const origin = request.headers.origin;
+    if (!isOriginAllowed(origin, request.headers.host, request.headers['x-forwarded-host'])) {
       socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
       socket.destroy();
       return;
     }
-
-    if (isAuthEnabled()) {
-      const cookies = parseCookies(request.headers.cookie);
-      if (!verifySessionToken(cookies['livecast_session'])) {
-        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-        socket.destroy();
-        return;
-      }
+    if (!origin && process.env.NODE_ENV === 'production') {
+      socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+      socket.destroy();
+      return;
     }
 
     wss.handleUpgrade(request, socket, head, (ws) => {

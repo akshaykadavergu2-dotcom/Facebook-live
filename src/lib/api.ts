@@ -107,9 +107,10 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
     res = await fetch(apiUrl(path), {
-      credentials: API_BASE_URL ? 'include' : 'same-origin',
+      credentials: 'same-origin',
       ...init,
       headers: {
+        'X-Livecast-Client': 'livecast-web',
         ...(init?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
         ...(init?.headers ?? {}),
       },
@@ -135,13 +136,7 @@ export const api = {
       timestamp: string;
     }>('/api/health'),
 
-  getAuthStatus: () => requestJson<SecurityStatusInfo>('/api/auth/status'),
-  login: (password: string) =>
-    requestJson<{ authenticated: boolean; authRequired: boolean }>('/api/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ password }),
-    }),
-  logout: () => requestJson<{ authenticated: boolean }>('/api/auth/logout', { method: 'POST' }),
+  getSecurityStatus: () => requestJson<SecurityStatusInfo>('/api/security/status'),
 
   getStreamStatus: () =>
     requestJson<{ telemetry: StreamTelemetry; logs: StreamLogEntry[] }>('/api/stream/status'),
@@ -199,8 +194,11 @@ export const api = {
     try {
       res = await fetch(apiUrl('/api/videos/validate-youtube'), {
         method: 'POST',
-        credentials: API_BASE_URL ? 'include' : 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Livecast-Client': 'livecast-web',
+        },
         body: JSON.stringify({ url }),
       });
     } catch {

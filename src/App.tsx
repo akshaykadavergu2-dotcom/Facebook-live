@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, LogOut, Menu, Radio, RefreshCw, Wifi, WifiOff } from 'lucide-react';
+import { AlertTriangle, Menu, Radio, RefreshCw, Wifi, WifiOff } from 'lucide-react';
 import type {
   OverlayConfig,
   RtmpPublicConfig,
@@ -12,7 +12,6 @@ import type {
   YouTubeValidationResult,
 } from '../shared/types';
 import { api, API_BASE_URL, formatDuration, getWebSocketUrl } from './lib/api';
-import { AuthGateModal } from './components/AuthGateModal';
 import { DashboardView } from './components/DashboardView';
 import { HistoryView } from './components/HistoryView';
 import { LiveStudioView } from './components/LiveStudioView';
@@ -108,20 +107,16 @@ export default function App() {
   const loadStudioData = useCallback(async () => {
     setBackendError(null);
     try {
-      const authRes = await api.getAuthStatus();
-      setSecurity(authRes);
-
-      if (authRes.authRequired && !authRes.authenticated) {
-        return;
-      }
-
-      const [statusRes, rtmpRes, videosRes, overlaysRes, historyRes] = await Promise.all([
+      const [securityRes, statusRes, rtmpRes, videosRes, overlaysRes, historyRes] = await Promise.all([
+        api.getSecurityStatus(),
         api.getStreamStatus(),
         api.getRtmpConfig(),
         api.getVideos(),
         api.getOverlays(),
         api.getHistory(),
       ]);
+
+      setSecurity(securityRes);
 
       setTelemetry(statusRes.telemetry);
       setLogs(statusRes.logs);
@@ -161,7 +156,6 @@ export default function App() {
   useEffect(() => {
     if (bootLoading) return;
     if (backendError) return;
-    if (security?.authRequired && !security.authenticated) return;
 
     let closedByCleanup = false;
     let reconnectTimer: number | null = null;
@@ -232,7 +226,7 @@ export default function App() {
         wsRef.current = null;
       }
     };
-  }, [bootLoading, backendError, security?.authRequired, security?.authenticated]);
+  }, [bootLoading, backendError]);
 
   const handleGenerateSample = async () => {
     setGeneratingSample(true);
@@ -252,11 +246,6 @@ export default function App() {
     setHistory(res.history);
   };
 
-  const handleLogout = async () => {
-    await api.logout();
-    setSecurity((prev) => (prev ? { ...prev, authenticated: false } : prev));
-  };
-
   if (bootLoading) {
     return (
       <div className="min-h-screen bg-[#0B0E14] flex flex-col items-center justify-center gap-2 text-sm text-slate-400 px-4 text-center">
@@ -265,16 +254,6 @@ export default function App() {
           <span className="text-xs font-mono text-slate-500 break-all">{API_BASE_URL}</span>
         )}
       </div>
-    );
-  }
-
-  if (security?.authRequired && !security.authenticated) {
-    return (
-      <AuthGateModal
-        onAuthenticated={() => {
-          loadStudioData();
-        }}
-      />
     );
   }
 
@@ -347,17 +326,6 @@ export default function App() {
                 className="px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold whitespace-nowrap shrink-0"
               >
                 Live Studio
-              </button>
-            )}
-
-            {security?.authRequired && (
-              <button
-                type="button"
-                onClick={handleLogout}
-                aria-label="Sign out"
-                className="p-2 rounded-md border border-[#232B3A] text-slate-400 hover:text-slate-100 hover:bg-[#181F2C]"
-              >
-                <LogOut className="w-4 h-4" />
               </button>
             )}
           </div>
