@@ -27,6 +27,8 @@ function isCoHostedFullStackHost(): boolean {
   return (
     host === 'localhost' ||
     host === '127.0.0.1' ||
+    host === 'ai.studio' ||
+    host.endsWith('.ai.studio') ||
     host.endsWith('.run.app')
   );
 }

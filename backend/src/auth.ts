@@ -38,7 +38,11 @@ export function isOriginAllowed(
   if (allowed.has('*') || allowed.has(normalized)) {
     return true;
   }
-  if (/^https:\/\/[a-z0-9-]+--streamkarolive\.netlify\.app$/i.test(normalized)) {
+  if (
+    /^https:\/\/[a-z0-9-]+--streamkarolive\.netlify\.app$/i.test(normalized) ||
+    /^https:\/\/[a-z0-9-]+\.ai\.studio$/i.test(normalized) ||
+    /^https:\/\/[a-z0-9.-]+\.run\.app$/i.test(normalized)
+  ) {
     return true;
   }
 
