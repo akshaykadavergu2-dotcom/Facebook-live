@@ -720,8 +720,10 @@ export function attachWebSocketServer(server: http.Server): WebSocketServer {
   server.on('upgrade', (request, socket, head) => {
     const reqUrl = new URL(request.url || '/', `http://${request.headers.host || 'localhost'}`);
     if (reqUrl.pathname !== '/ws') {
-      socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
-      socket.destroy();
+      if (server.listenerCount('upgrade') <= 1) {
+        socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+        socket.destroy();
+      }
       return;
     }
 

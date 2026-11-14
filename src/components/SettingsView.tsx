@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle2, Eye, EyeOff, KeyRound, Lock, Server, ShieldCheck, Terminal } from 'lucide-react';
+import { CheckCircle2, Eye, EyeOff, KeyRound, Lock, Server, ShieldCheck, Smartphone, Terminal } from 'lucide-react';
 import type { RtmpPublicConfig, SecurityStatusInfo } from '../../shared/types';
 import { api, API_BASE_URL } from '../lib/api';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface SettingsViewProps {
   rtmpConfig: RtmpPublicConfig;
@@ -60,9 +61,25 @@ export function SettingsView({ rtmpConfig, security, onRtmpUpdated }: SettingsVi
   };
 
   return (
-    <div className="space-y-6 max-w-5xl min-w-0">
+    <div className="space-y-5 max-w-5xl min-w-0">
+      {/* Android PWA Install Card */}
+      <section className="bg-[#121721] border border-[#232B3A] rounded-2xl p-4 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 min-w-0">
+        <div className="space-y-1 min-w-0">
+          <h2 className="text-base font-semibold text-slate-100 flex items-center gap-2">
+            <Smartphone className="w-4 h-4 text-blue-400 shrink-0" />
+            <span>Android Mobile App (PWA)</span>
+          </h2>
+          <p className="text-xs text-slate-400 leading-relaxed">
+            Install LIVECAST STUDIO to your Android home screen for standalone full-screen broadcast control without browser bars.
+          </p>
+        </div>
+        <div className="shrink-0">
+          <PWAInstallButton />
+        </div>
+      </section>
+
       {/* Facebook RTMP Configuration */}
-      <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-4 sm:p-6 space-y-4 min-w-0">
+      <section className="bg-[#121721] border border-[#232B3A] rounded-2xl p-4 sm:p-6 space-y-4 min-w-0">
         <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[#232B3A]">
           <div className="flex items-center gap-2.5">
             <KeyRound className="w-4 h-4 text-blue-400 shrink-0" />
@@ -84,7 +101,7 @@ export function SettingsView({ rtmpConfig, security, onRtmpUpdated }: SettingsVi
               value={serverUrl}
               onChange={(e) => setServerUrl(e.target.value)}
               placeholder="rtmps://live-api-s.facebook.com:443/rtmp/"
-              className="w-full bg-[#0B0E14] border border-[#263042] rounded-md px-3 py-2 text-xs font-mono text-slate-100"
+              className="w-full min-h-[44px] bg-[#0B0E14] border border-[#263042] rounded-xl px-3 py-2 text-xs font-mono text-slate-100"
             />
           </div>
 
@@ -104,13 +121,13 @@ export function SettingsView({ rtmpConfig, security, onRtmpUpdated }: SettingsVi
                     ? 'Leave blank to keep existing encrypted key'
                     : 'Enter Facebook Live Stream Key'
                 }
-                className="w-full bg-[#0B0E14] border border-[#263042] rounded-md pl-3 pr-10 py-2 text-xs font-mono text-slate-100"
+                className="w-full min-h-[44px] bg-[#0B0E14] border border-[#263042] rounded-xl pl-3 pr-12 py-2 text-xs font-mono text-slate-100"
               />
               <button
                 type="button"
                 onClick={() => setShowKey((v) => !v)}
                 aria-label={showKey ? 'Hide key' : 'Show key'}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-200"
+                className="absolute right-1 top-1/2 -translate-y-1/2 min-h-[40px] min-w-[40px] flex items-center justify-center text-slate-400 hover:text-slate-200"
               >
                 {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
@@ -120,7 +137,7 @@ export function SettingsView({ rtmpConfig, security, onRtmpUpdated }: SettingsVi
 
         {feedback && (
           <div
-            className={`p-3 rounded-md border text-xs break-words ${
+            className={`p-3 rounded-xl border text-xs break-words ${
               feedback.type === 'ok'
                 ? 'bg-emerald-950/25 border-emerald-500/35 text-emerald-200'
                 : 'bg-rose-950/25 border-rose-500/35 text-rose-200'
@@ -135,7 +152,7 @@ export function SettingsView({ rtmpConfig, security, onRtmpUpdated }: SettingsVi
             type="button"
             onClick={handleSave}
             disabled={saving}
-            className="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold disabled:opacity-50"
+            className="min-h-[44px] px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold disabled:opacity-50"
           >
             {saving ? 'Saving...' : 'Save Credentials'}
           </button>
@@ -144,7 +161,7 @@ export function SettingsView({ rtmpConfig, security, onRtmpUpdated }: SettingsVi
               type="button"
               onClick={handleClearKey}
               disabled={saving}
-              className="px-4 py-2 rounded-md border border-[#2C374C] text-xs font-medium text-rose-300 hover:bg-rose-950/30 disabled:opacity-50"
+              className="min-h-[44px] px-4 py-2 rounded-xl border border-[#2C374C] text-xs font-medium text-rose-300 hover:bg-rose-950/30 disabled:opacity-50"
             >
               Clear Stored Key
             </button>

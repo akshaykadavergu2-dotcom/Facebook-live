@@ -19,7 +19,18 @@ function normalizeBaseUrl(raw: string): string {
   return `https://${trimmed}`;
 }
 
-export const API_BASE_URL = normalizeBaseUrl(import.meta.env.VITE_API_BASE_URL || '');
+function isCoHostedFullStackHost(): boolean {
+  if (typeof window === 'undefined') return false;
+  const host = window.location.hostname.toLowerCase();
+  return (
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host.endsWith('.run.app')
+  );
+}
+
+const RAW_API_BASE_URL = normalizeBaseUrl(import.meta.env.VITE_API_BASE_URL || '');
+export const API_BASE_URL = isCoHostedFullStackHost() ? '' : RAW_API_BASE_URL;
 
 export function apiUrl(path: string): string {
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;

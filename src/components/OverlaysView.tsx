@@ -9,12 +9,12 @@ import type {
   YouTubeValidationResult,
 } from '../../shared/types';
 import { api } from '../lib/api';
-import { VideoPreviewStage } from './VideoPreviewStage';
+import { VideoPreviewStage, type ProgramMonitorSource } from './VideoPreviewStage';
 
 interface OverlaysViewProps {
   overlays: OverlayConfig;
   onOverlaysUpdated: (next: OverlayConfig) => void;
-  sourceType: VideoSourceType;
+  sourceType: ProgramMonitorSource;
   selectedVideo: VideoAsset | null;
   directUrl: string;
   youtubeResult: YouTubeValidationResult | null;
@@ -35,6 +35,7 @@ export function OverlaysView({
   const [saving, setSaving] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [removingLogo, setRemovingLogo] = useState(false);
+  const [showOverlayPreview, setShowOverlayPreview] = useState(true);
   const [statusMsg, setStatusMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
   useEffect(() => {
@@ -105,9 +106,9 @@ export function OverlaysView({
   };
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start min-w-0">
+    <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start min-w-0">
       <div className="xl:col-span-7 space-y-4 min-w-0">
-        <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-4 sm:p-5 space-y-4 min-w-0">
+        <section className="bg-[#121721] border border-[#232B3A] rounded-2xl p-4 sm:p-5 space-y-4 min-w-0">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
               <h2 className="text-base font-semibold text-slate-100">Live Graphics Preview Stage</h2>
@@ -115,15 +116,24 @@ export function OverlaysView({
                 Changes preview immediately and burn into the FFmpeg output stream on next broadcast start.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={saving}
-              className="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center gap-2 disabled:opacity-50 whitespace-nowrap"
-            >
-              <Save className="w-3.5 h-3.5" />
-              <span>{saving ? 'Saving...' : 'Save Overlays'}</span>
-            </button>
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowOverlayPreview((v) => !v)}
+                className="min-h-[44px] px-3.5 py-2 rounded-xl border border-[#2C374C] bg-[#181F2C] hover:bg-[#222C3E] text-slate-200 text-xs font-medium whitespace-nowrap"
+              >
+                {showOverlayPreview ? 'Hide Preview' : 'Show Preview'}
+              </button>
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={saving}
+                className="min-h-[44px] px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center gap-2 disabled:opacity-50 whitespace-nowrap"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>{saving ? 'Saving...' : 'Save Overlays'}</span>
+              </button>
+            </div>
           </div>
 
           <VideoPreviewStage
@@ -133,7 +143,7 @@ export function OverlaysView({
             youtubeResult={youtubeResult}
             overlays={draft}
             streamStatus={streamStatus}
-            showOverlays={true}
+            showOverlays={showOverlayPreview}
           />
 
           {statusMsg && (
@@ -156,15 +166,15 @@ export function OverlaysView({
       </div>
 
       <div className="xl:col-span-5 space-y-5 min-w-0">
-        <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-4 sm:p-5 space-y-4 min-w-0">
+        <section className="bg-[#121721] border border-[#232B3A] rounded-2xl p-4 sm:p-5 space-y-4 min-w-0">
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-slate-100">01. Corner Logo (Transparent PNG)</h3>
-            <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer shrink-0">
+            <label className="min-h-[44px] flex items-center gap-2 text-xs text-slate-300 cursor-pointer shrink-0">
               <input
                 type="checkbox"
                 checked={draft.logoEnabled}
                 onChange={(e) => updateField('logoEnabled', e.target.checked)}
-                className="rounded border-[#2E384B] bg-[#0B0E14] text-blue-600"
+                className="w-4 h-4 rounded border-[#2E384B] bg-[#0B0E14] text-blue-600"
               />
               <span>Enabled</span>
             </label>
@@ -175,7 +185,7 @@ export function OverlaysView({
               type="button"
               onClick={() => logoInputRef.current?.click()}
               disabled={uploadingLogo}
-              className="px-3 py-2 rounded-md bg-[#181F2C] hover:bg-[#212B3D] border border-[#2C374C] text-xs font-medium text-slate-100 flex items-center gap-2 disabled:opacity-50"
+              className="min-h-[44px] px-3.5 py-2 rounded-xl bg-[#181F2C] hover:bg-[#212B3D] border border-[#2C374C] text-xs font-medium text-slate-100 flex items-center gap-2 disabled:opacity-50"
             >
               <ImagePlus className="w-3.5 h-3.5 text-blue-400" />
               <span>{uploadingLogo ? 'Uploading PNG...' : 'Upload PNG Logo'}</span>
@@ -185,7 +195,7 @@ export function OverlaysView({
                 type="button"
                 onClick={handleDeleteLogo}
                 disabled={removingLogo}
-                className="px-3 py-2 rounded-md border border-[#2C374C] text-xs text-rose-400 hover:bg-rose-950/30 flex items-center gap-1.5 disabled:opacity-50"
+                className="min-h-[44px] px-3.5 py-2 rounded-xl border border-[#2C374C] text-xs text-rose-400 hover:bg-rose-950/30 flex items-center gap-1.5 disabled:opacity-50"
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 <span>{removingLogo ? 'Removing...' : 'Remove'}</span>
@@ -206,7 +216,7 @@ export function OverlaysView({
               <select
                 value={draft.logoPosition}
                 onChange={(e) => updateField('logoPosition', e.target.value as LogoPosition)}
-                className="w-full bg-[#0B0E14] border border-[#263042] rounded-md px-2.5 py-2 text-xs text-slate-100"
+                className="w-full min-h-[44px] bg-[#0B0E14] border border-[#263042] rounded-xl px-3 py-2 text-xs text-slate-100"
               >
                 <option value="top-left">Top Left</option>
                 <option value="top-right">Top Right</option>
@@ -243,15 +253,15 @@ export function OverlaysView({
           </div>
         </section>
 
-        <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-4 sm:p-5 space-y-3 min-w-0">
+        <section className="bg-[#121721] border border-[#232B3A] rounded-2xl p-4 sm:p-5 space-y-3 min-w-0">
           <div className="flex items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold text-slate-100">02. Headline Banner</h3>
-            <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer shrink-0">
+            <h3 className="text-sm font-semibold text-slate-100">02. Breaking News Headline</h3>
+            <label className="min-h-[44px] flex items-center gap-2 text-xs text-slate-300 cursor-pointer shrink-0">
               <input
                 type="checkbox"
                 checked={draft.headlineEnabled}
                 onChange={(e) => updateField('headlineEnabled', e.target.checked)}
-                className="rounded border-[#2E384B] bg-[#0B0E14] text-blue-600"
+                className="w-4 h-4 rounded border-[#2E384B] bg-[#0B0E14] text-blue-600"
               />
               <span>Enabled</span>
             </label>
@@ -262,7 +272,7 @@ export function OverlaysView({
             value={draft.headlineText}
             onChange={(e) => updateField('headlineText', e.target.value)}
             placeholder="Headline text..."
-            className="w-full bg-[#0B0E14] border border-[#263042] rounded-md px-3 py-2 text-xs text-slate-100"
+            className="w-full min-h-[44px] bg-[#0B0E14] border border-[#263042] rounded-xl px-3 py-2 text-xs text-slate-100"
           />
 
           <div className="grid grid-cols-3 gap-2.5">
@@ -274,7 +284,7 @@ export function OverlaysView({
                 max={64}
                 value={draft.headlineFontSize}
                 onChange={(e) => updateField('headlineFontSize', Number(e.target.value))}
-                className="w-full bg-[#0B0E14] border border-[#263042] rounded-md px-2.5 py-1.5 text-xs font-mono text-slate-100"
+                className="w-full min-h-[44px] bg-[#0B0E14] border border-[#263042] rounded-xl px-2.5 py-1.5 text-xs font-mono text-slate-100"
               />
             </div>
             <div>
@@ -283,7 +293,7 @@ export function OverlaysView({
                 type="color"
                 value={draft.headlineColor}
                 onChange={(e) => updateField('headlineColor', e.target.value)}
-                className="w-full h-8 bg-[#0B0E14] border border-[#263042] rounded cursor-pointer"
+                className="w-full h-11 bg-[#0B0E14] border border-[#263042] rounded-xl cursor-pointer"
               />
             </div>
             <div>
@@ -292,7 +302,7 @@ export function OverlaysView({
                 type="color"
                 value={draft.headlineBgColor}
                 onChange={(e) => updateField('headlineBgColor', e.target.value)}
-                className="w-full h-8 bg-[#0B0E14] border border-[#263042] rounded cursor-pointer"
+                className="w-full h-11 bg-[#0B0E14] border border-[#263042] rounded-xl cursor-pointer"
               />
             </div>
           </div>
@@ -305,7 +315,7 @@ export function OverlaysView({
                 onChange={(e) =>
                   updateField('headlineAnimation', e.target.value as 'static' | 'fade' | 'slide')
                 }
-                className="w-full bg-[#0B0E14] border border-[#263042] rounded-md px-2.5 py-1.5 text-xs text-slate-100"
+                className="w-full min-h-[44px] bg-[#0B0E14] border border-[#263042] rounded-xl px-2.5 py-1.5 text-xs text-slate-100"
               >
                 <option value="static">Static</option>
                 <option value="fade">Fade In</option>
@@ -322,21 +332,21 @@ export function OverlaysView({
                 max={100}
                 value={Math.round(draft.headlineBgOpacity * 100)}
                 onChange={(e) => updateField('headlineBgOpacity', Number(e.target.value) / 100)}
-                className="w-full accent-blue-600 mt-1.5"
+                className="w-full accent-blue-600 mt-2.5"
               />
             </div>
           </div>
         </section>
 
-        <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-4 sm:p-5 space-y-3 min-w-0">
+        <section className="bg-[#121721] border border-[#232B3A] rounded-2xl p-4 sm:p-5 space-y-3 min-w-0">
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-slate-100">03. Lower-Third News Graphic</h3>
-            <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer shrink-0">
+            <label className="min-h-[44px] flex items-center gap-2 text-xs text-slate-300 cursor-pointer shrink-0">
               <input
                 type="checkbox"
                 checked={draft.lowerThirdEnabled}
                 onChange={(e) => updateField('lowerThirdEnabled', e.target.checked)}
-                className="rounded border-[#2E384B] bg-[#0B0E14] text-blue-600"
+                className="w-4 h-4 rounded border-[#2E384B] bg-[#0B0E14] text-blue-600"
               />
               <span>Enabled</span>
             </label>
@@ -347,14 +357,14 @@ export function OverlaysView({
             value={draft.lowerThirdTitle}
             onChange={(e) => updateField('lowerThirdTitle', e.target.value)}
             placeholder="Speaker / Segment Title"
-            className="w-full bg-[#0B0E14] border border-[#263042] rounded-md px-3 py-2 text-xs text-slate-100"
+            className="w-full min-h-[44px] bg-[#0B0E14] border border-[#263042] rounded-xl px-3 py-2 text-xs text-slate-100"
           />
           <input
             type="text"
             value={draft.lowerThirdSubtitle}
             onChange={(e) => updateField('lowerThirdSubtitle', e.target.value)}
             placeholder="Subtitle / Role / Location"
-            className="w-full bg-[#0B0E14] border border-[#263042] rounded-md px-3 py-2 text-xs text-slate-100"
+            className="w-full min-h-[44px] bg-[#0B0E14] border border-[#263042] rounded-xl px-3 py-2 text-xs text-slate-100"
           />
 
           <div className="grid grid-cols-3 gap-2.5">
@@ -364,7 +374,7 @@ export function OverlaysView({
                 type="color"
                 value={draft.lowerThirdAccentColor}
                 onChange={(e) => updateField('lowerThirdAccentColor', e.target.value)}
-                className="w-full h-8 bg-[#0B0E14] border border-[#263042] rounded cursor-pointer"
+                className="w-full h-11 bg-[#0B0E14] border border-[#263042] rounded-xl cursor-pointer"
               />
             </div>
             <div>
@@ -373,7 +383,7 @@ export function OverlaysView({
                 type="color"
                 value={draft.lowerThirdBgColor}
                 onChange={(e) => updateField('lowerThirdBgColor', e.target.value)}
-                className="w-full h-8 bg-[#0B0E14] border border-[#263042] rounded cursor-pointer"
+                className="w-full h-11 bg-[#0B0E14] border border-[#263042] rounded-xl cursor-pointer"
               />
             </div>
             <div>
@@ -383,7 +393,7 @@ export function OverlaysView({
                 onChange={(e) =>
                   updateField('lowerThirdAnimation', e.target.value as 'static' | 'fade' | 'slide')
                 }
-                className="w-full h-8 bg-[#0B0E14] border border-[#263042] rounded-md px-2 text-xs text-slate-100"
+                className="w-full h-11 bg-[#0B0E14] border border-[#263042] rounded-xl px-2 text-xs text-slate-100"
               >
                 <option value="slide">Slide</option>
                 <option value="fade">Fade</option>
@@ -393,15 +403,15 @@ export function OverlaysView({
           </div>
         </section>
 
-        <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-4 sm:p-5 space-y-3 min-w-0">
+        <section className="bg-[#121721] border border-[#232B3A] rounded-2xl p-4 sm:p-5 space-y-3 min-w-0">
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-slate-100">04. Scrolling News Ticker</h3>
-            <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer shrink-0">
+            <label className="min-h-[44px] flex items-center gap-2 text-xs text-slate-300 cursor-pointer shrink-0">
               <input
                 type="checkbox"
                 checked={draft.tickerEnabled}
                 onChange={(e) => updateField('tickerEnabled', e.target.checked)}
-                className="rounded border-[#2E384B] bg-[#0B0E14] text-blue-600"
+                className="w-4 h-4 rounded border-[#2E384B] bg-[#0B0E14] text-blue-600"
               />
               <span>Enabled</span>
             </label>
@@ -412,7 +422,7 @@ export function OverlaysView({
             value={draft.tickerText}
             onChange={(e) => updateField('tickerText', e.target.value)}
             placeholder="Enter scrolling ticker message..."
-            className="w-full bg-[#0B0E14] border border-[#263042] rounded-md px-3 py-2 text-xs text-slate-100"
+            className="w-full bg-[#0B0E14] border border-[#263042] rounded-xl px-3 py-2.5 text-xs text-slate-100"
           />
 
           <div className="grid grid-cols-3 gap-2.5">
@@ -424,7 +434,7 @@ export function OverlaysView({
                 max={36}
                 value={draft.tickerFontSize}
                 onChange={(e) => updateField('tickerFontSize', Number(e.target.value))}
-                className="w-full bg-[#0B0E14] border border-[#263042] rounded-md px-2.5 py-1.5 text-xs font-mono text-slate-100"
+                className="w-full min-h-[44px] bg-[#0B0E14] border border-[#263042] rounded-xl px-2.5 py-1.5 text-xs font-mono text-slate-100"
               />
             </div>
             <div>
@@ -433,7 +443,7 @@ export function OverlaysView({
                 type="color"
                 value={draft.tickerColor}
                 onChange={(e) => updateField('tickerColor', e.target.value)}
-                className="w-full h-8 bg-[#0B0E14] border border-[#263042] rounded cursor-pointer"
+                className="w-full h-11 bg-[#0B0E14] border border-[#263042] rounded-xl cursor-pointer"
               />
             </div>
             <div>
@@ -442,23 +452,38 @@ export function OverlaysView({
                 type="color"
                 value={draft.tickerBgColor}
                 onChange={(e) => updateField('tickerBgColor', e.target.value)}
-                className="w-full h-8 bg-[#0B0E14] border border-[#263042] rounded cursor-pointer"
+                className="w-full h-11 bg-[#0B0E14] border border-[#263042] rounded-xl cursor-pointer"
               />
             </div>
           </div>
 
-          <div>
-            <label className="block text-[11px] text-slate-400 mb-1">
-              Scroll Speed ({draft.tickerSpeed} px/sec)
-            </label>
-            <input
-              type="range"
-              min={40}
-              max={220}
-              value={draft.tickerSpeed}
-              onChange={(e) => updateField('tickerSpeed', Number(e.target.value))}
-              className="w-full accent-blue-600"
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[11px] text-slate-400 mb-1">
+                Scroll Speed ({draft.tickerSpeed} px/sec)
+              </label>
+              <input
+                type="range"
+                min={40}
+                max={220}
+                value={draft.tickerSpeed}
+                onChange={(e) => updateField('tickerSpeed', Number(e.target.value))}
+                className="w-full accent-blue-600 mt-1.5"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] text-slate-400 mb-1">
+                Bar Opacity ({Math.round(draft.tickerBgOpacity * 100)}%)
+              </label>
+              <input
+                type="range"
+                min={10}
+                max={100}
+                value={Math.round(draft.tickerBgOpacity * 100)}
+                onChange={(e) => updateField('tickerBgOpacity', Number(e.target.value) / 100)}
+                className="w-full accent-blue-600 mt-1.5"
+              />
+            </div>
           </div>
         </section>
       </div>

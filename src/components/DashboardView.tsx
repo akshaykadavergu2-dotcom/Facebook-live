@@ -77,34 +77,34 @@ export function DashboardView({
       ready: rtmpConfig.hasStreamKey,
       detail: rtmpConfig.hasStreamKey
         ? `Encrypted key stored (${rtmpConfig.maskedStreamKey})`
-        : 'Add your Facebook Stream Key in Settings or Live Studio',
-      actionLabel: 'Configure RTMP',
-      target: 'settings' as NavSection,
+        : 'Add your Facebook Stream Key in Facebook Output or Settings',
+      actionLabel: 'Facebook Output',
+      target: 'facebook' as NavSection,
     },
   ];
 
   return (
-    <div className="space-y-6 min-w-0">
-      <div className="bg-[#121721] border border-[#232B3A] rounded-lg p-4 sm:p-6 flex flex-col md:flex-row md:items-center justify-between gap-4 min-w-0">
+    <div className="space-y-5 min-w-0">
+      <div className="bg-[#121721] border border-[#232B3A] rounded-2xl p-4 sm:p-6 flex flex-col md:flex-row md:items-center justify-between gap-4 min-w-0">
         <div className="space-y-1 min-w-0">
-          <h2 className="text-xl font-semibold text-slate-100">Broadcast Control Overview</h2>
-          <p className="text-sm text-slate-400 max-w-2xl">
+          <h2 className="text-lg sm:text-xl font-semibold text-slate-100">Broadcast Control Overview</h2>
+          <p className="text-xs sm:text-sm text-slate-400 max-w-2xl">
             Prepare authorized media files or direct streams, compose real-time graphics overlays, and encode directly to Facebook Live via RTMPS.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-3 shrink-0">
+        <div className="grid grid-cols-1 sm:flex flex-wrap items-center gap-2.5 shrink-0">
           <button
             type="button"
             onClick={handleSampleClick}
             disabled={generatingSample}
-            className="px-4 py-2 text-sm font-medium rounded-md border border-[#2A3447] bg-[#181F2C] text-slate-200 hover:bg-[#1E2738] disabled:opacity-50 transition-colors whitespace-nowrap"
+            className="min-h-[44px] px-4 py-2 text-sm font-medium rounded-xl border border-[#2A3447] bg-[#181F2C] text-slate-200 hover:bg-[#1E2738] disabled:opacity-50 transition-colors whitespace-nowrap"
           >
             {generatingSample ? 'Generating MP4...' : 'Generate Sample MP4'}
           </button>
           <button
             type="button"
             onClick={() => onNavigate('studio')}
-            className="px-4 py-2 text-sm font-medium rounded-md bg-blue-600 hover:bg-blue-500 text-white flex items-center gap-2 transition-colors whitespace-nowrap"
+            className="min-h-[44px] px-4 py-2 text-sm font-semibold rounded-xl bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center gap-2 transition-colors whitespace-nowrap"
           >
             <Radio className="w-4 h-4" />
             <span>Open Live Studio</span>
@@ -198,7 +198,7 @@ export function DashboardView({
                   <button
                     type="button"
                     onClick={() => onNavigate(item.target)}
-                    className="text-xs font-medium text-blue-400 hover:text-blue-300 whitespace-nowrap shrink-0"
+                    className="min-h-[44px] px-2 text-xs font-medium text-blue-400 hover:text-blue-300 whitespace-nowrap shrink-0 flex items-center"
                   >
                     {item.actionLabel}
                   </button>
@@ -212,23 +212,32 @@ export function DashboardView({
               <KeyRound className="w-3.5 h-3.5 text-slate-400 shrink-0" />
               <span>Stream keys are AES-256-GCM encrypted on the backend</span>
             </span>
-            <button
-              type="button"
-              onClick={() => onNavigate('overlays')}
-              className="text-blue-400 hover:text-blue-300 font-medium whitespace-nowrap"
-            >
-              Edit Overlays
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => onNavigate('youtube')}
+                className="min-h-[36px] text-blue-400 hover:text-blue-300 font-medium whitespace-nowrap"
+              >
+                YouTube Preview
+              </button>
+              <button
+                type="button"
+                onClick={() => onNavigate('overlays')}
+                className="min-h-[36px] text-blue-400 hover:text-blue-300 font-medium whitespace-nowrap"
+              >
+                Edit Overlays
+              </button>
+            </div>
           </div>
         </section>
 
-        <section className="bg-[#121721] border border-[#232B3A] rounded-lg p-5 sm:p-6 flex flex-col min-w-0">
+        <section className="bg-[#121721] border border-[#232B3A] rounded-2xl p-5 sm:p-6 flex flex-col min-w-0">
           <div className="flex items-center justify-between pb-4 border-b border-[#232B3A]">
             <h3 className="text-base font-semibold text-slate-100">Recent Broadcast Sessions</h3>
             <button
               type="button"
               onClick={() => onNavigate('history')}
-              className="text-xs font-medium text-blue-400 hover:text-blue-300 whitespace-nowrap"
+              className="min-h-[36px] text-xs font-medium text-blue-400 hover:text-blue-300 whitespace-nowrap"
             >
               View All
             </button>
