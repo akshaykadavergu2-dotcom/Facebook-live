@@ -1,0 +1,14 @@
+{
+  "available": true,
+  "appName": "Livecast Android Capture",
+  "packageName": "com.livecast.capture",
+  "buildVariant": "debug",
+  "versionName": "1.0.0",
+  "versionCode": 1,
+  "buildDateIso": "2026-11-14T05:51:49Z",
+  "sizeBytes": 6782810,
+  "sha256": "d024b3c620df76b4be97405375ea286a220af5b6472d71c0603c39ce923261b6",
+  "commitSha": "4194a77ef272f6d2ef66ca4174ad0e824a51bbda",
+  "downloadPath": "/downloads/livecast-companion.apk",
+  "workflowRunUrl": "https://github.com/akshaykadavergu2-dotcom/Facebook-live/actions/runs/43563316971"
+}
