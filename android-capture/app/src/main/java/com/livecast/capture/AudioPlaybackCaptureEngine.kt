@@ -136,7 +136,7 @@ class AudioPlaybackCaptureEngine(
                     continue
                 }
 
-                val nowUs = (SystemClock.elapsedRealtimeNanos() / 1000L - monotonicClockBaseUs).coerceAtLeast(0L)
+                val nowUs = ((System.nanoTime() / 1000L) - monotonicClockBaseUs).coerceAtLeast(0L)
                 val inIdx = encoder.dequeueInputBuffer(10_000)
                 if (inIdx >= 0) {
                     val inBuf = encoder.getInputBuffer(inIdx)

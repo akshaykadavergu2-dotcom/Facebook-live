@@ -83,6 +83,7 @@ class ScreenVideoEncoder(
         var windowFrames = 0
         var windowStartMs = System.currentTimeMillis()
         var sentConfig = false
+        var videoPtsBaseUs: Long? = null
 
         try {
             while (running.get() && scope.isActive) {
@@ -133,8 +134,12 @@ class ScreenVideoEncoder(
                                     }
                                 }
 
+                                val wallElapsedUs = ((System.nanoTime() / 1000L) - monotonicClockBaseUs).coerceAtLeast(0L)
+                                val base = videoPtsBaseUs ?: (info.presentationTimeUs - wallElapsedUs).also {
+                                    videoPtsBaseUs = it
+                                }
                                 val isKey = (info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0
-                                val relPtsUs = (info.presentationTimeUs - monotonicClockBaseUs).coerceAtLeast(0L)
+                                val relPtsUs = (info.presentationTimeUs - base).coerceAtLeast(0L)
                                 wsClient.sendBinaryFrame(
                                     frameType = IngestProtocol.FRAME_VIDEO_DATA,
                                     isKeyframe = isKey,

@@ -74,7 +74,21 @@ class MainActivity : AppCompatActivity() {
             data.getQueryParameter("sessionId")?.let { binding.etSessionId.setText(it) }
             data.getQueryParameter("token")?.let { binding.etIngestToken.setText(it) }
             data.getQueryParameter("yt")?.let { binding.etYoutubeUrl.setText(it) }
+            if (hasValidPairingCredentials()) {
+                connectToBackendOnly()
+            }
         }
+    }
+
+    private fun hasValidPairingCredentials(): Boolean {
+        return binding.etBackendUrl.text.toString().trim().isNotEmpty() &&
+            binding.etSessionId.text.toString().trim().isNotEmpty() &&
+            binding.etIngestToken.text.toString().trim().isNotEmpty()
+    }
+
+    private fun showValidationError(message: String) {
+        binding.tvErrorBanner.visibility = View.VISIBLE
+        binding.tvErrorBanner.text = message
     }
 
     private fun observeServiceState() {
@@ -117,6 +131,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun connectToBackendOnly() {
+        if (!hasValidPairingCredentials()) {
+            showValidationError(
+                "Tap CONNECT ANDROID in LIVECAST STUDIO web app and select Launch Companion App (or paste Session ID & Ingest Token).",
+            )
+            return
+        }
+        binding.tvErrorBanner.visibility = View.GONE
         val intent = Intent(this, CaptureForegroundService::class.java).apply {
             action = CaptureForegroundService.ACTION_CONNECT_ONLY
             putExtra(CaptureForegroundService.EXTRA_BACKEND_URL, binding.etBackendUrl.text.toString().trim())
@@ -127,6 +148,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun checkPermissionsAndStartCapture() {
+        if (!hasValidPairingCredentials()) {
+            showValidationError(
+                "Pair with LIVECAST STUDIO first: tap CONNECT ANDROID on the website and open Launch Companion App.",
+            )
+            return
+        }
+        binding.tvErrorBanner.visibility = View.GONE
         val missing = mutableListOf<String>()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) !=
             PackageManager.PERMISSION_GRANTED

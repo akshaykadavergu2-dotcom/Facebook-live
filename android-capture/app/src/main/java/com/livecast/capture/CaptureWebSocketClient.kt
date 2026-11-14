@@ -23,6 +23,7 @@ class CaptureWebSocketClient(
     private val scope: CoroutineScope,
     private val onConnectionState: (ConnectionCaptureStatus, String?) -> Unit,
     private val onRemoteCommand: (type: String, youtubeUrl: String?) -> Unit,
+    private val onLatencyMeasured: (Long) -> Unit,
 ) {
     private data class QueuedFrame(
         val bytes: ByteArray,
@@ -95,6 +96,14 @@ class CaptureWebSocketClient(
                 try {
                     val json = JSONObject(text)
                     val type = json.optString("type", "")
+                    if (type == "telemetry-ack") {
+                        val sentAtMs = json.optLong("sentAtMs", 0L)
+                        if (sentAtMs > 0L) {
+                            val rttHalf = ((System.currentTimeMillis() - sentAtMs) / 2L).coerceIn(1L, 10_000L)
+                            onLatencyMeasured(rttHalf)
+                        }
+                        return
+                    }
                     val yt = if (json.has("youtubeUrl") && !json.isNull("youtubeUrl")) {
                         json.optString("youtubeUrl", "")
                     } else {

@@ -279,6 +279,13 @@ class AndroidCaptureManager extends EventEmitter {
           if (delta < 30000) {
             session.telemetry.latencyMs = Math.round(delta);
           }
+          if (session.ws && session.ws.readyState === WebSocket.OPEN) {
+            try {
+              session.ws.send(JSON.stringify({ type: 'telemetry-ack', sentAtMs: msg.sentAtMs }));
+            } catch {
+              // ignore ack send failure
+            }
+          }
         }
         this.emitTelemetry(session);
       } else if (msg.type === 'error') {

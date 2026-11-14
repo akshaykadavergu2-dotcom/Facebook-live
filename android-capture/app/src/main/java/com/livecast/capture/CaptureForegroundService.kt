@@ -13,8 +13,9 @@ import android.content.pm.ServiceInfo
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
-import android.os.SystemClock
+import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
@@ -88,7 +89,7 @@ class CaptureForegroundService : Service() {
                 val backendUrl = intent.getStringExtra(EXTRA_BACKEND_URL).orEmpty()
                 val sessionId = intent.getStringExtra(EXTRA_SESSION_ID).orEmpty()
                 val token = intent.getStringExtra(EXTRA_INGEST_TOKEN).orEmpty()
-                ensureForeground()
+                ensureForeground(requireProjectionType = false)
                 ensureWebSocketConnected(backendUrl, sessionId, token)
             }
 
@@ -104,11 +105,12 @@ class CaptureForegroundService : Service() {
                     intent.getParcelableExtra(EXTRA_RESULT_DATA)
                 }
 
-                ensureForeground()
+                val hasProjectionToken = resultCode == Activity.RESULT_OK && resultData != null
+                ensureForeground(requireProjectionType = hasProjectionToken)
                 ensureWebSocketConnected(backendUrl, sessionId, token)
 
-                if (resultCode == Activity.RESULT_OK && resultData != null) {
-                    startMediaProjectionPipeline(resultCode, resultData)
+                if (hasProjectionToken) {
+                    startMediaProjectionPipeline(resultCode, resultData!!)
                 } else {
                     _uiState.value = _uiState.value.copy(
                         permissionGranted = false,
@@ -121,13 +123,18 @@ class CaptureForegroundService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun ensureForeground() {
+    private fun ensureForeground(requireProjectionType: Boolean) {
         val notification = buildNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val fgsType = if (requireProjectionType) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            } else {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            }
             startForeground(
                 NOTIFICATION_ID,
                 notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION,
+                fgsType,
             )
         } else {
             startForeground(NOTIFICATION_ID, notification)
@@ -158,6 +165,9 @@ class CaptureForegroundService : Service() {
                         "start-request" -> _remoteStartRequest.value = youtubeUrl ?: ""
                     }
                 },
+                onLatencyMeasured = { latency ->
+                    _uiState.value = _uiState.value.copy(latencyMs = latency)
+                },
             )
         }
         wsClient?.connect(backendUrl, sessionId, token)
@@ -178,10 +188,10 @@ class CaptureForegroundService : Service() {
             return
         }
 
-        projection.registerCallback(projectionCallback, null)
+        projection.registerCallback(projectionCallback, Handler(Looper.getMainLooper()))
         mediaProjection = projection
 
-        val monotonicClockBaseUs = SystemClock.elapsedRealtimeNanos() / 1000L
+        val monotonicClockBaseUs = System.nanoTime() / 1000L
         val densityDpi = resources.displayMetrics.densityDpi
 
         val socket = wsClient ?: return
@@ -320,7 +330,7 @@ class CaptureForegroundService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setSmallIcon(R.drawable.ic_stat_livecast)
             .setContentTitle(getString(R.string.notification_title))
             .setContentText(getString(R.string.notification_text))
             .setOngoing(true)

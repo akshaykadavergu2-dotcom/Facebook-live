@@ -13,7 +13,9 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import com.livecast.capture.databinding.ActivityMonitorACaptureBinding
+import kotlinx.coroutines.launch
 
 /**
  * Dedicated distraction-free Monitor A capture surface.
@@ -35,6 +37,14 @@ class MonitorACaptureActivity : AppCompatActivity() {
         binding = ActivityMonitorACaptureBinding.inflate(layoutInflater)
         setContentView(binding.root)
         enterImmersiveFullscreen()
+
+        lifecycleScope.launch {
+            CaptureForegroundService.uiState.collect { state ->
+                if (state.connectionStatus == ConnectionCaptureStatus.Stopped && !isFinishing) {
+                    finish()
+                }
+            }
+        }
 
         val youtubeUrl = intent.getStringExtra(EXTRA_YOUTUBE_URL).orEmpty()
         val videoId = IngestProtocol.extractYouTubeVideoId(youtubeUrl)
