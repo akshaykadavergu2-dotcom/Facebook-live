@@ -58,6 +58,11 @@ class CaptureWebSocketClient(
         targetSessionId = sessionId.trim()
         targetToken = ingestToken.trim()
         reconnectAttempt = 0
+        try {
+            activeWs?.close(1000, "Reconnecting with updated session")
+        } catch (_: Exception) {
+        }
+        activeWs = null
         openSocket()
         startSenderLoop()
     }
@@ -86,13 +91,16 @@ class CaptureWebSocketClient(
             .url(buildWsUrl())
             .build()
 
-        activeWs = client.newWebSocket(request, object : WebSocketListener() {
+        lateinit var createdSocket: WebSocket
+        createdSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
+                if (webSocket !== activeWs) return
                 reconnectAttempt = 0
                 onConnectionState(ConnectionCaptureStatus.Connected, null)
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
+                if (webSocket !== activeWs) return
                 try {
                     val json = JSONObject(text)
                     val type = json.optString("type", "")
@@ -120,20 +128,36 @@ class CaptureWebSocketClient(
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                if (!closedByUser.get() && code != 1000 && code != 4004) {
-                    scheduleReconnect("Connection closed ($code)")
-                } else if (closedByUser.get()) {
+                if (webSocket !== activeWs) return
+                if (closedByUser.get() || code == 1000) {
                     onConnectionState(ConnectionCaptureStatus.Stopped, null)
+                } else if (code == 4001) {
+                    // Superseded by a newer WebSocket connection
+                } else if (code == 4004) {
+                    onConnectionState(
+                        ConnectionCaptureStatus.Error,
+                        "Capture session not found on backend (4004). Tap CONNECT ANDROID in web studio.",
+                    )
+                } else {
+                    scheduleReconnect("Connection closed ($code${if (reason.isNotBlank()) ": $reason" else ""})")
                 }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                if (!closedByUser.get()) {
-                    val msg = t.message ?: "WebSocket transport failure"
-                    scheduleReconnect(msg)
+                if (webSocket !== activeWs || closedByUser.get()) return
+                val httpCode = response?.code
+                if (httpCode == 401 || httpCode == 403) {
+                    onConnectionState(
+                        ConnectionCaptureStatus.Error,
+                        "Session ID or Ephemeral Ingest Token rejected (HTTP $httpCode). Generate a fresh session in LIVECAST STUDIO.",
+                    )
+                    return
                 }
+                val msg = t.message ?: "WebSocket transport failure"
+                scheduleReconnect(msg)
             }
         })
+        activeWs = createdSocket
     }
 
     private fun scheduleReconnect(reason: String) {
@@ -201,7 +225,10 @@ class CaptureWebSocketClient(
             .put("height", state.height)
             .put("audioSampleRate", state.audioSampleRate)
             .put("sentAtMs", System.currentTimeMillis())
-        ws.send(json.toString())
+        try {
+            ws.send(json.toString())
+        } catch (_: Exception) {
+        }
     }
 
     fun sendError(message: String) {
@@ -209,7 +236,10 @@ class CaptureWebSocketClient(
         val json = JSONObject()
             .put("type", "error")
             .put("error", message)
-        ws.send(json.toString())
+        try {
+            ws.send(json.toString())
+        } catch (_: Exception) {
+        }
     }
 
     fun sendStopAndClose() {

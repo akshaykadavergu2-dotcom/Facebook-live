@@ -115,7 +115,23 @@ const SECTION_TITLES: Record<NavSection, string> = {
 };
 
 export default function App() {
-  const [section, setSection] = useState<NavSection>('studio');
+  const [companionMissingNotice, setCompanionMissingNotice] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('companion') === 'missing') {
+      return 'Livecast Android Capture (com.livecast.capture) is not installed on this Android phone yet. Tap DOWNLOAD ANDROID APP above to install livecast-companion.apk first, or paste Session ID & Ephemeral Ingest Token manually if already installed.';
+    }
+    return null;
+  });
+  const [section, setSection] = useState<NavSection>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('companion') === 'missing') {
+        return 'android-capture';
+      }
+    }
+    return 'studio';
+  });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const [security, setSecurity] = useState<SecurityStatusInfo | null>(null);
@@ -147,46 +163,104 @@ export default function App() {
   const [generatingSample, setGeneratingSample] = useState(false);
 
   const [wsConnected, setWsConnected] = useState(false);
+  const [wsError, setWsError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
   const loadStudioData = useCallback(async () => {
     setBackendError(null);
-    try {
-      const [securityRes, statusRes, rtmpRes, videosRes, overlaysRes, historyRes, captureRes] =
-        await Promise.all([
-          api.getSecurityStatus(),
-          api.getStreamStatus(),
-          api.getRtmpConfig(),
-          api.getVideos(),
-          api.getOverlays(),
-          api.getHistory(),
-          api.getCaptureStatus(),
-        ]);
 
-      setSecurity(securityRes);
+    const [
+      healthOutcome,
+      securityOutcome,
+      statusOutcome,
+      rtmpOutcome,
+      videosOutcome,
+      overlaysOutcome,
+      historyOutcome,
+      captureOutcome,
+    ] = await Promise.allSettled([
+      api.getHealth(),
+      api.getSecurityStatus(),
+      api.getStreamStatus(),
+      api.getRtmpConfig(),
+      api.getVideos(),
+      api.getOverlays(),
+      api.getHistory(),
+      api.getCaptureStatus(),
+    ]);
 
-      setTelemetry(statusRes.telemetry);
-      setQuality(statusRes.telemetry.quality);
-      setLoopVideo(statusRes.telemetry.loopVideo);
-      setLogs(statusRes.logs);
-      setRtmpConfig(rtmpRes);
-      setVideos(videosRes.videos);
-      if (videosRes.videos.length > 0) {
-        setSelectedVideoId((prev) => prev ?? videosRes.videos[0].id);
+    if (securityOutcome.status === 'fulfilled') {
+      setSecurity(securityOutcome.value);
+    }
+    if (statusOutcome.status === 'fulfilled') {
+      setTelemetry(statusOutcome.value.telemetry);
+      setQuality(statusOutcome.value.telemetry.quality);
+      setLoopVideo(statusOutcome.value.telemetry.loopVideo);
+      setLogs(statusOutcome.value.logs);
+    }
+    if (rtmpOutcome.status === 'fulfilled') {
+      setRtmpConfig(rtmpOutcome.value);
+    }
+    if (videosOutcome.status === 'fulfilled') {
+      const list = videosOutcome.value.videos;
+      setVideos(list);
+      if (list.length > 0) {
+        setSelectedVideoId((prev) => prev ?? list[0].id);
       }
-      setOverlays(overlaysRes);
-      setHistory(historyRes.history);
-      setCaptureTelemetry(captureRes.telemetry);
-    } catch (err) {
-      const isNetlifyMissingBase =
-        !API_BASE_URL && window.location.hostname.endsWith('.netlify.app');
+    }
+    if (overlaysOutcome.status === 'fulfilled') {
+      setOverlays(overlaysOutcome.value);
+    }
+    if (historyOutcome.status === 'fulfilled') {
+      setHistory(historyOutcome.value.history);
+    }
+    if (captureOutcome.status === 'fulfilled') {
+      setCaptureTelemetry(captureOutcome.value.telemetry);
+    }
+
+    const failures: string[] = [];
+    const checkFailure = (label: string, outcome: PromiseSettledResult<unknown>) => {
+      if (outcome.status === 'rejected') {
+        const msg =
+          outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
+        failures.push(`${label}: ${msg}`);
+      }
+    };
+
+    checkFailure('/api/security/status', securityOutcome);
+    checkFailure('/api/stream/status', statusOutcome);
+    checkFailure('/api/stream/credentials', rtmpOutcome);
+    checkFailure('/api/videos', videosOutcome);
+    checkFailure('/api/overlays', overlaysOutcome);
+    checkFailure('/api/history', historyOutcome);
+    checkFailure('/api/capture/status', captureOutcome);
+
+    if (failures.length > 0 || healthOutcome.status === 'rejected') {
+      const healthSummary =
+        healthOutcome.status === 'fulfilled'
+          ? `/api/health responded HTTP 200 (ok=${String(healthOutcome.value.ok)}, ffmpeg=${String(healthOutcome.value.ffmpegAvailable)})`
+          : `/api/health failed: ${
+              healthOutcome.reason instanceof Error
+                ? healthOutcome.reason.message
+                : String(healthOutcome.reason)
+            }`;
+
+      const detailLines = failures.length > 0 ? failures.slice(0, 3).join(' | ') : healthSummary;
       setBackendError(
-        isNetlifyMissingBase
-          ? 'VITE_API_BASE_URL is not configured for this Netlify deployment. Set VITE_API_BASE_URL to your Render backend URL in Netlify Environment Variables and redeploy.'
-          : err instanceof Error
-            ? err.message
-            : 'Unable to connect to the LIVECAST STUDIO backend server.',
+        failures.length > 0
+          ? `${healthSummary}. Failing request(s): ${detailLines}`
+          : healthSummary,
       );
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      if (url.searchParams.has('companion')) {
+        url.searchParams.delete('companion');
+        window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+      }
     }
   }, []);
 
@@ -206,22 +280,34 @@ export default function App() {
   useEffect(() => {
     if (bootLoading) return;
     if (backendError) return;
+    if (!API_BASE_URL && window.location.hostname.endsWith('.netlify.app')) {
+      setWsConnected(false);
+      setWsError('Missing VITE_API_BASE_URL for Netlify WebSocket connection.');
+      return;
+    }
 
     let closedByCleanup = false;
     let reconnectTimer: number | null = null;
+    const wsTargetUrl = getWebSocketUrl();
 
     const connect = () => {
       let ws: WebSocket;
       try {
-        ws = new WebSocket(getWebSocketUrl());
-      } catch {
+        ws = new WebSocket(wsTargetUrl);
+      } catch (err) {
         setWsConnected(false);
+        setWsError(
+          `WebSocket init failed (${wsTargetUrl}): ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
         return;
       }
       wsRef.current = ws;
 
       ws.onopen = () => {
         setWsConnected(true);
+        setWsError(null);
       };
 
       ws.onmessage = (event) => {
@@ -266,15 +352,22 @@ export default function App() {
         }
       };
 
-      ws.onclose = () => {
+      ws.onclose = (ev) => {
         setWsConnected(false);
         if (!closedByCleanup) {
+          if (ev.code !== 1000 && ev.code !== 1001) {
+            const reasonText = ev.reason ? ` (${ev.reason})` : '';
+            setWsError(`WebSocket closed (code ${ev.code}${reasonText}) on ${wsTargetUrl}`);
+          }
           reconnectTimer = window.setTimeout(connect, 3000);
         }
       };
 
       ws.onerror = () => {
         setWsConnected(false);
+        if (!closedByCleanup) {
+          setWsError(`WebSocket connection error on ${wsTargetUrl}`);
+        }
       };
     };
 
@@ -386,7 +479,10 @@ export default function App() {
               <span className="text-slate-600">/</span>
               <span>{formatDuration(telemetry.durationSec)}</span>
               <span className="text-slate-600">/</span>
-              <span className="flex items-center gap-1 text-slate-400">
+              <span
+                className="flex items-center gap-1 text-slate-400"
+                title={wsError ?? undefined}
+              >
                 {wsConnected ? (
                   <>
                     <Wifi className="w-3.5 h-3.5 text-emerald-400" />
@@ -395,7 +491,7 @@ export default function App() {
                 ) : (
                   <>
                     <WifiOff className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Offline</span>
+                    <span>{wsError ? 'WS Error' : 'Offline'}</span>
                   </>
                 )}
               </span>
@@ -418,13 +514,21 @@ export default function App() {
         <main className="flex-1 p-3 sm:p-4 lg:p-6 pb-24 lg:pb-6 min-w-0 lg:overflow-y-auto lg:overflow-x-hidden scroll-smooth">
           <OfflineIndicator />
 
-          {backendError && (
+          {(backendError || (!wsConnected && wsError)) && (
             <div className="mb-5 bg-rose-950/35 border border-rose-500/40 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-start gap-2.5 min-w-0">
                 <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
                 <div className="text-xs text-rose-100 space-y-1 min-w-0">
-                  <div className="font-semibold text-sm text-rose-200">Backend API Connection Issue</div>
-                  <p className="break-words">{backendError}</p>
+                  <div className="font-semibold text-sm text-rose-200">
+                    {backendError ? 'Backend API Connection Issue' : 'WebSocket Telemetry Issue'}
+                  </div>
+                  <p className="break-words font-mono text-[11px] leading-relaxed">
+                    {backendError || wsError}
+                  </p>
+                  <p className="text-[11px] text-rose-300/80 break-all">
+                    Origin: {typeof window !== 'undefined' ? window.location.origin : ''} · Backend:{' '}
+                    {API_BASE_URL || 'Same-Origin (/api)'}
+                  </p>
                 </div>
               </div>
               <button
@@ -495,6 +599,8 @@ export default function App() {
               onTelemetryUpdated={setTelemetry}
               onChangeSourceType={setSourceType}
               onNavigate={setSection}
+              initialNotice={companionMissingNotice}
+              onDismissInitialNotice={() => setCompanionMissingNotice(null)}
             />
           )}
 

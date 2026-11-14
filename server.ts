@@ -56,8 +56,21 @@ self.addEventListener('activate', (event) => {
     });
     app.use(vite.middlewares);
   } else if (hasBuiltDist) {
-    app.use(express.static(distDir));
-    app.get('*', (_req, res) => {
+    app.use(
+      express.static(distDir, {
+        setHeaders: (res, filePath) => {
+          if (filePath.endsWith('.apk')) {
+            res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+            res.setHeader('Content-Disposition', 'attachment; filename="livecast-companion.apk"');
+          }
+        },
+      }),
+    );
+    app.get('*', (req, res) => {
+      if (req.path.startsWith('/downloads/')) {
+        res.status(404).json({ error: 'Android APK not published yet.' });
+        return;
+      }
       res.sendFile(path.join(distDir, 'index.html'));
     });
   }

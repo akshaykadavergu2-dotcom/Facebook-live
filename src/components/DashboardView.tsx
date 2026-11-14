@@ -9,6 +9,7 @@ import type {
   VideoAsset,
 } from '../../shared/types';
 import { formatBytes, formatDuration } from '../lib/api';
+import { AndroidApkDownloadCard } from './AndroidApkDownloadCard';
 import type { NavSection } from './Sidebar';
 
 interface DashboardViewProps {
@@ -121,6 +122,8 @@ export function DashboardView({
           <span>{sampleError}</span>
         </div>
       )}
+
+      <AndroidApkDownloadCard />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 min-w-0">
         <div className="bg-[#121721] border border-[#232B3A] rounded-lg p-5 min-w-0">

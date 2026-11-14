@@ -25,6 +25,7 @@ import type {
   YouTubeValidationResult,
 } from '../../shared/types';
 import { api, API_BASE_URL, formatDuration } from '../lib/api';
+import { AndroidApkDownloadCard } from './AndroidApkDownloadCard';
 import type { NavSection } from './Sidebar';
 import { VideoPreviewStage, type ProgramMonitorSource } from './VideoPreviewStage';
 import { YouTubeMonitorCard } from './YouTubeMonitorCard';
@@ -43,6 +44,21 @@ interface AndroidLiveCaptureViewProps {
   onTelemetryUpdated: (next: StreamTelemetry) => void;
   onChangeSourceType: (type: ProgramMonitorSource) => void;
   onNavigate: (section: NavSection) => void;
+  initialNotice?: string | null;
+  onDismissInitialNotice?: () => void;
+}
+
+function isAndroidUserAgent(): boolean {
+  return typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent);
+}
+
+function buildAndroidChromeIntentUrl(deepLinkUrl: string): string {
+  const withoutScheme = deepLinkUrl.replace(/^livecast:\/\//i, '');
+  const fallbackUrl =
+    typeof window !== 'undefined'
+      ? `${window.location.origin}/?companion=missing`
+      : 'https://streamkarolive.netlify.app/?companion=missing';
+  return `intent://${withoutScheme}#Intent;scheme=livecast;package=com.livecast.capture;S.browser_fallback_url=${encodeURIComponent(fallbackUrl)};end`;
 }
 
 export function AndroidLiveCaptureView({
@@ -59,6 +75,8 @@ export function AndroidLiveCaptureView({
   onTelemetryUpdated,
   onChangeSourceType,
   onNavigate,
+  initialNotice,
+  onDismissInitialNotice,
 }: AndroidLiveCaptureViewProps) {
   const [sessionInfo, setSessionInfo] = useState<AndroidCaptureSessionInfo | null>(null);
   const [connectingAndroid, setConnectingAndroid] = useState(false);
@@ -161,9 +179,8 @@ export function AndroidLiveCaptureView({
       }
 
       onChangeSourceType('android-capture');
-      window.location.href = activeSession.deepLinkUrl;
       setCaptureActionMsg(
-        'Opening Android Capture companion app via deep link. Grant MediaProjection permission on Monitor A to stream live.',
+        `Session ${activeSession.sessionId} is ready. Tap "Launch Companion App" below to open Livecast Android Capture directly on your phone.`,
       );
     } catch (err) {
       setCaptureActionError(
@@ -172,6 +189,20 @@ export function AndroidLiveCaptureView({
     } finally {
       setStartingCapture(false);
     }
+  };
+
+  const handleLaunchCompanionTap = () => {
+    setCaptureActionError(null);
+    onDismissInitialNotice?.();
+
+    const startedAt = Date.now();
+    window.setTimeout(() => {
+      if (document.visibilityState === 'visible' && Date.now() - startedAt >= 1200) {
+        setCaptureActionError(
+          'Browser stayed in the foreground after tapping Launch Companion App. If Livecast Android Capture (com.livecast.capture) is not installed yet, download & install livecast-companion.apk above first; if already installed, try the direct "livecast://" link or paste Session ID & Ephemeral Ingest Token into the app.',
+        );
+      }
+    }, 1500);
   };
 
   const handleStopCapture = async () => {
@@ -253,6 +284,8 @@ export function AndroidLiveCaptureView({
 
   return (
     <div className="space-y-5 min-w-0">
+      <AndroidApkDownloadCard />
+
       {/* Android Companion Pairing & Capture Control Header */}
       <section className="bg-[#121721] border border-[#232B3A] rounded-2xl p-4 sm:p-5 space-y-4 min-w-0">
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -401,11 +434,11 @@ export function AndroidLiveCaptureView({
           </div>
         </div>
 
-        {(captureActionError || captureTelemetry.lastError) && (
+        {(captureActionError || captureTelemetry.lastError || initialNotice) && (
           <div className="p-3 rounded-xl bg-rose-950/35 border border-rose-500/40 text-xs text-rose-200 flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
             <span className="break-words min-w-0">
-              {captureActionError || captureTelemetry.lastError}
+              {captureActionError || captureTelemetry.lastError || initialNotice}
             </span>
           </div>
         )}
@@ -424,13 +457,43 @@ export function AndroidLiveCaptureView({
               <div className="text-xs font-semibold text-slate-200">
                 Android Companion App Session Credentials (No Facebook Keys Included)
               </div>
-              <a
-                href={sessionInfo.deepLinkUrl}
-                className="min-h-[38px] px-3 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-blue-300 text-xs font-medium inline-flex items-center gap-1.5"
-              >
-                <ExternalLink className="w-3.5 h-3.5" />
-                <span>Launch Companion App</span>
-              </a>
+              <div className="flex flex-wrap items-center gap-2">
+                <a
+                  href={
+                    isAndroidUserAgent()
+                      ? buildAndroidChromeIntentUrl(sessionInfo.deepLinkUrl)
+                      : sessionInfo.deepLinkUrl
+                  }
+                  target="_top"
+                  rel="noopener noreferrer"
+                  onClick={handleLaunchCompanionTap}
+                  className="min-h-[42px] px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold inline-flex items-center gap-1.5"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Launch Companion App</span>
+                </a>
+                <a
+                  href={sessionInfo.deepLinkUrl}
+                  target="_top"
+                  rel="noopener noreferrer"
+                  onClick={handleLaunchCompanionTap}
+                  className="min-h-[42px] px-3 py-2 rounded-lg bg-[#181F2C] hover:bg-[#232C3E] border border-[#2A3447] text-slate-200 text-xs font-medium inline-flex items-center gap-1.5"
+                >
+                  <span>livecast:// Link</span>
+                </a>
+                <button
+                  type="button"
+                  onClick={() => copyValue('deeplink', sessionInfo.deepLinkUrl)}
+                  className="min-h-[42px] px-3 py-2 rounded-lg bg-[#181F2C] hover:bg-[#232C3E] border border-[#2A3447] text-slate-200 text-xs font-medium inline-flex items-center gap-1.5"
+                >
+                  {copiedKey === 'deeplink' ? (
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                  ) : (
+                    <Copy className="w-3.5 h-3.5" />
+                  )}
+                  <span>{copiedKey === 'deeplink' ? 'Copied' : 'Copy Link'}</span>
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 text-xs">

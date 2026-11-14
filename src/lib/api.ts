@@ -62,39 +62,72 @@ export function getWebSocketUrl(): string {
   return `${protocol}//${window.location.host}/ws`;
 }
 
-async function parseApiResponse<T>(res: Response): Promise<T> {
+export class ApiError extends Error {
+  public readonly status: number | null;
+  public readonly statusText: string;
+  public readonly method: string;
+  public readonly url: string;
+  public readonly responseBody: string;
+
+  constructor(opts: {
+    message: string;
+    status: number | null;
+    statusText: string;
+    method: string;
+    url: string;
+    responseBody?: string;
+  }) {
+    super(opts.message);
+    this.name = 'ApiError';
+    this.status = opts.status;
+    this.statusText = opts.statusText;
+    this.method = opts.method;
+    this.url = opts.url;
+    this.responseBody = opts.responseBody ?? '';
+  }
+}
+
+function summarizeResponseExcerpt(rawText: string): string {
+  const plain = rawText
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return plain.length > 220 ? `${plain.slice(0, 220)}...` : plain;
+}
+
+async function parseApiResponse<T>(
+  res: Response,
+  method: string,
+  targetUrl: string,
+): Promise<T> {
   const contentType = (res.headers.get('content-type') || '').toLowerCase();
   const isJson = contentType.includes('application/json');
   const rawText = await res.text();
 
   if (!res.ok) {
+    let detail = '';
     if (isJson && rawText.trim().length > 0) {
       try {
         const parsed = JSON.parse(rawText) as { error?: string; message?: string };
-        throw new Error(
-          parsed.error || parsed.message || `Backend request failed (${res.status} ${res.statusText}).`,
-        );
-      } catch (err) {
-        if (err instanceof Error && !err.message.startsWith('Unexpected')) {
-          throw err;
-        }
+        detail = parsed.error || parsed.message || '';
+      } catch {
+        detail = summarizeResponseExcerpt(rawText);
       }
+    } else if (rawText.trim().length > 0) {
+      detail = summarizeResponseExcerpt(rawText);
     }
 
-    if (res.status === 404) {
-      throw new Error(
-        'Backend API endpoint not found (404). If deployed on Netlify, verify VITE_API_BASE_URL is set to your running Render/Node.js backend URL.',
-      );
-    }
-    if (res.status === 502 || res.status === 503 || res.status === 504) {
-      throw new Error(
-        `Backend server is temporarily unavailable (${res.status}). If hosted on Render free tier, wait ~30 seconds for wake-up and retry.`,
-      );
-    }
-
-    throw new Error(
-      `Backend returned non-JSON error (${res.status} ${res.statusText || 'Error'}). Verify VITE_API_BASE_URL and CORS configuration.`,
-    );
+    const statusLabel = `HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}`;
+    throw new ApiError({
+      message: `${statusLabel} on ${method} ${targetUrl}${detail ? ` — ${detail}` : ''}`,
+      status: res.status,
+      statusText: res.statusText || '',
+      method,
+      url: targetUrl,
+      responseBody: rawText,
+    });
   }
 
   if (res.status === 204) {
@@ -102,42 +135,124 @@ async function parseApiResponse<T>(res: Response): Promise<T> {
   }
 
   if (!rawText.trim()) {
-    throw new Error('Backend returned an empty response instead of JSON.');
+    throw new ApiError({
+      message: `HTTP ${res.status} on ${method} ${targetUrl} returned an empty response instead of JSON.`,
+      status: res.status,
+      statusText: res.statusText || '',
+      method,
+      url: targetUrl,
+      responseBody: rawText,
+    });
   }
 
   if (!isJson) {
-    throw new Error(
-      'Expected JSON from backend API, but received HTML or plain text. On Netlify, set VITE_API_BASE_URL to your separate Node.js backend URL and rebuild.',
-    );
+    const excerpt = summarizeResponseExcerpt(rawText);
+    throw new ApiError({
+      message: `Expected JSON from ${method} ${targetUrl} (HTTP ${res.status}, content-type: ${contentType || 'unknown'})${excerpt ? ` — ${excerpt}` : ''}`,
+      status: res.status,
+      statusText: res.statusText || '',
+      method,
+      url: targetUrl,
+      responseBody: rawText,
+    });
   }
 
   try {
     return JSON.parse(rawText) as T;
   } catch {
-    throw new Error('Backend returned malformed JSON data.');
+    throw new ApiError({
+      message: `Malformed JSON from ${method} ${targetUrl} (HTTP ${res.status}) — ${summarizeResponseExcerpt(rawText)}`,
+      status: res.status,
+      statusText: res.statusText || '',
+      method,
+      url: targetUrl,
+      responseBody: rawText,
+    });
   }
 }
 
-async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(apiUrl(path), {
-      credentials: 'same-origin',
-      ...init,
-      headers: {
-        'X-Livecast-Client': 'livecast-web',
-        ...(init?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
-        ...(init?.headers ?? {}),
-      },
-    });
-  } catch {
-    throw new Error(
-      API_BASE_URL
-        ? `Unable to reach backend server at ${API_BASE_URL}. Confirm the service is running and allows CORS from ${window.location.origin}.`
-        : 'Unable to reach backend API. Ensure the Node.js server is running or configure VITE_API_BASE_URL.',
-    );
+async function performFetch(
+  targetUrl: string,
+  method: string,
+  init?: RequestInit,
+): Promise<Response> {
+  const isMutating = method !== 'GET' && method !== 'HEAD';
+  const hasJsonBody = init?.body !== undefined && !(init.body instanceof FormData);
+
+  const headers: Record<string, string> = {};
+  if (isMutating) {
+    headers['X-Livecast-Client'] = 'livecast-web';
   }
-  return parseApiResponse<T>(res);
+  if (hasJsonBody) {
+    headers['Content-Type'] = 'application/json';
+  }
+
+  return fetch(targetUrl, {
+    credentials: 'same-origin',
+    ...init,
+    method,
+    headers: {
+      ...headers,
+      ...((init?.headers as Record<string, string> | undefined) ?? {}),
+    },
+  });
+}
+
+async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = (init?.method || 'GET').toUpperCase();
+  const targetUrl = apiUrl(path);
+
+  if (
+    !API_BASE_URL &&
+    typeof window !== 'undefined' &&
+    window.location.hostname.endsWith('.netlify.app')
+  ) {
+    throw new ApiError({
+      message: `VITE_API_BASE_URL is empty in this Netlify build (${method} ${targetUrl} cannot reach Render). Set VITE_API_BASE_URL=https://facebook-live-gvx5.onrender.com in Netlify and redeploy.`,
+      status: null,
+      statusText: 'MISSING_VITE_API_BASE_URL',
+      method,
+      url: targetUrl,
+    });
+  }
+
+  const maxAttempts = method === 'GET' ? 2 : 1;
+  let lastNetworkErr: unknown = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const res = await performFetch(targetUrl, method, init);
+      if (
+        method === 'GET' &&
+        attempt < maxAttempts &&
+        (res.status === 502 || res.status === 503 || res.status === 504)
+      ) {
+        await new Promise((r) => setTimeout(r, 1200));
+        continue;
+      }
+      return await parseApiResponse<T>(res, method, targetUrl);
+    } catch (err) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      lastNetworkErr = err;
+      if (attempt < maxAttempts) {
+        await new Promise((r) => setTimeout(r, 1200));
+        continue;
+      }
+    }
+  }
+
+  const fetchErrMsg =
+    lastNetworkErr instanceof Error ? lastNetworkErr.message : String(lastNetworkErr || 'Failed to fetch');
+  throw new ApiError({
+    message: `Network/CORS failure on ${method} ${targetUrl}: ${fetchErrMsg}`,
+    status: null,
+    statusText: 'NETWORK_ERROR',
+    method,
+    url: targetUrl,
+    responseBody: fetchErrMsg,
+  });
 }
 
 export const api = {
@@ -205,33 +320,46 @@ export const api = {
       method: 'DELETE',
     }),
   validateYouTube: async (url: string): Promise<YouTubeValidationResult> => {
+    const targetUrl = apiUrl('/api/videos/validate-youtube');
     let res: Response;
     try {
-      res = await fetch(apiUrl('/api/videos/validate-youtube'), {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Livecast-Client': 'livecast-web',
-        },
+      res = await performFetch(targetUrl, 'POST', {
         body: JSON.stringify({ url }),
       });
-    } catch {
-      throw new Error('Unable to reach backend API to validate YouTube URL.');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err || 'Failed to fetch');
+      throw new ApiError({
+        message: `Network/CORS failure on POST ${targetUrl}: ${msg}`,
+        status: null,
+        statusText: 'NETWORK_ERROR',
+        method: 'POST',
+        url: targetUrl,
+        responseBody: msg,
+      });
     }
 
     const contentType = (res.headers.get('content-type') || '').toLowerCase();
     const rawText = await res.text();
-    if (!contentType.includes('application/json') || !rawText.trim()) {
-      return parseApiResponse<YouTubeValidationResult>(
-        new Response(rawText, { status: res.status, statusText: res.statusText, headers: res.headers }),
-      );
+    if (contentType.includes('application/json') && rawText.trim() && (res.ok || res.status === 400)) {
+      try {
+        return JSON.parse(rawText) as YouTubeValidationResult;
+      } catch {
+        throw new ApiError({
+          message: `Malformed JSON on POST ${targetUrl} (HTTP ${res.status})`,
+          status: res.status,
+          statusText: res.statusText || '',
+          method: 'POST',
+          url: targetUrl,
+          responseBody: rawText,
+        });
+      }
     }
-    try {
-      return JSON.parse(rawText) as YouTubeValidationResult;
-    } catch {
-      throw new Error('Received malformed JSON while validating YouTube URL.');
-    }
+
+    return parseApiResponse<YouTubeValidationResult>(
+      new Response(rawText, { status: res.status, statusText: res.statusText, headers: res.headers }),
+      'POST',
+      targetUrl,
+    );
   },
   validateDirectUrl: (url: string) =>
     requestJson<{

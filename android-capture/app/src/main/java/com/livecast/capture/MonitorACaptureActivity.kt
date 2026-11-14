@@ -38,9 +38,12 @@ class MonitorACaptureActivity : AppCompatActivity() {
         setContentView(binding.root)
         enterImmersiveFullscreen()
 
+        var sawActiveOrConnecting = false
         lifecycleScope.launch {
             CaptureForegroundService.uiState.collect { state ->
-                if (state.connectionStatus == ConnectionCaptureStatus.Stopped && !isFinishing) {
+                if (state.connectionStatus != ConnectionCaptureStatus.Stopped) {
+                    sawActiveOrConnecting = true
+                } else if (sawActiveOrConnecting && !isFinishing) {
                     finish()
                 }
             }

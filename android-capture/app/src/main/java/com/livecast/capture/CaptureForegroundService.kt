@@ -154,9 +154,17 @@ class CaptureForegroundService : Service() {
             wsClient = CaptureWebSocketClient(
                 scope = serviceScope,
                 onConnectionState = { status, errMsg ->
+                    val clearedError =
+                        if (status == ConnectionCaptureStatus.Connected ||
+                            status == ConnectionCaptureStatus.Capturing
+                        ) {
+                            null
+                        } else {
+                            errMsg ?: _uiState.value.lastError
+                        }
                     _uiState.value = _uiState.value.copy(
                         connectionStatus = status,
-                        lastError = errMsg ?: _uiState.value.lastError,
+                        lastError = clearedError,
                     )
                 },
                 onRemoteCommand = { type, youtubeUrl ->
