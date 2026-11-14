@@ -36,11 +36,12 @@ gradle -p android-capture testDebugUnitTest assembleDebug --no-daemon
 Output APK:
 `android-capture/app/build/outputs/apk/debug/app-debug.apk`
 
-### Option 3 — Automatic Cloud Build via GitHub Actions
-This repository includes `.github/workflows/android-apk.yml`.
+### Option 3 — Automatic Cloud Build via GitHub Actions (No PC Required)
+This repository includes `.github/workflows/android-apk.yml` configured with JDK 17, Gradle 8.10.2, and Android SDK 35 (`android-actions/setup-android@v4`).
 1. Push your changes to `akshaykadavergu2-dotcom/Facebook-live` on GitHub.
-2. Open the **Actions** tab -> select **Build Android Companion APK** (runs automatically on pushes touching `android-capture/**`, or click **Run workflow**).
-3. When the job completes, download the **`livecast-android-capture-debug-apk`** artifact and unzip it to obtain `app-debug.apk`.
+2. In your GitHub repo **Settings > Actions > General > Workflow permissions**, make sure **Read and write permissions** is selected so the workflow can commit the built APK.
+3. Open the **Actions** tab -> select **Build Android Companion APK** (runs automatically on pushes touching `android-capture/**` or `.github/workflows/android-apk.yml`, or tap **Run workflow** manually).
+4. Once complete, the workflow automatically publishes `public/downloads/livecast-companion.apk` + `public/downloads/apk-metadata.json` to your branch (triggering Netlify to serve `https://streamkarolive.netlify.app/downloads/livecast-companion.apk`) and also uploads the `livecast-android-capture-debug-apk` GitHub Actions artifact.
 
 ---
 
