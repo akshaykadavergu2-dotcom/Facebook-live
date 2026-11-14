@@ -3,9 +3,13 @@ import type { YouTubeValidationResult } from '../shared/types.ts';
 const YOUTUBE_ID_REGEX = /^[a-zA-Z0-9_-]{11}$/;
 
 export function extractYouTubeVideoId(rawUrl: string): string | null {
+  const trimmed = rawUrl.trim();
+  const urlMatch = trimmed.match(/https?:\/\/[^\s]+/i);
+  const candidateUrl = urlMatch ? urlMatch[0] : trimmed;
+
   let parsed: URL;
   try {
-    parsed = new URL(rawUrl.trim());
+    parsed = new URL(candidateUrl);
   } catch {
     return null;
   }
@@ -19,9 +23,15 @@ export function extractYouTubeVideoId(rawUrl: string): string | null {
 
   if (host === 'youtu.be') {
     candidate = parsed.pathname.split('/').filter(Boolean)[0] ?? null;
-  } else if (host === 'youtube.com' || host === 'm.youtube.com' || host === 'youtube-nocookie.com') {
-    const parts = parsed.pathname.split('/').filter(Boolean);
-    if (parsed.pathname === '/watch') {
+  } else if (
+    host === 'youtube.com' ||
+    host === 'm.youtube.com' ||
+    host === 'music.youtube.com' ||
+    host === 'youtube-nocookie.com'
+  ) {
+    const normalizedPath = parsed.pathname.replace(/\/+$/, '');
+    const parts = normalizedPath.split('/').filter(Boolean);
+    if (normalizedPath === '/watch') {
       candidate = parsed.searchParams.get('v');
     } else if (
       parts.length >= 2 &&

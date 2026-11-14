@@ -460,7 +460,14 @@ export function LiveStudioView({
         <section className="bg-[#121721] border border-[#232B3A] rounded-2xl p-3 sm:p-4 space-y-3.5 min-w-0">
           <div className="flex flex-wrap items-center justify-between gap-2 px-1">
             <div className="min-w-0">
-              <h2 className="text-sm sm:text-base font-semibold text-slate-100">Program Monitor</h2>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-sm sm:text-base font-semibold text-slate-100">Program Monitor</h2>
+                {sourceType === 'youtube-preview' && youtubeResult?.valid && (
+                  <span className="text-[11px] font-mono text-blue-300">
+                    · Preview Only (YouTube)
+                  </span>
+                )}
+              </div>
               <p className="text-[11px] sm:text-xs text-slate-400">
                 16:9 canvas with real-time overlay composition
               </p>
@@ -725,6 +732,11 @@ export function LiveStudioView({
                   inputMode="url"
                   value={ytUrlInput}
                   onChange={(e) => setYtUrlInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && ytUrlInput.trim() && !ytLoading) {
+                      handleLoadYouTube();
+                    }
+                  }}
                   placeholder="https://youtube.com/live/... or https://youtu.be/..."
                   className="flex-1 min-w-0 min-h-[44px] bg-[#0B0E14] border border-[#263042] rounded-xl px-3.5 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
                 />
@@ -740,21 +752,42 @@ export function LiveStudioView({
 
               {youtubeResult && (
                 <div
-                  className={`p-3.5 rounded-xl border text-xs space-y-1.5 ${
+                  className={`p-3.5 rounded-xl border text-xs space-y-2 ${
                     youtubeResult.valid
-                      ? 'bg-amber-950/25 border-amber-500/35 text-amber-100'
+                      ? 'bg-[#0E131B] border-blue-500/35 text-slate-200'
                       : 'bg-rose-950/25 border-rose-500/35 text-rose-200'
                   }`}
                 >
-                  {youtubeResult.valid && youtubeResult.title && (
-                    <div className="font-semibold text-sm text-slate-100 break-words">
-                      {youtubeResult.title} · {youtubeResult.authorName} · Preview Only
+                  {youtubeResult.valid ? (
+                    <>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-semibold text-blue-300">
+                          YouTube IFrame Preview Active · Preview Only
+                        </span>
+                        <span className="font-mono text-[11px] text-slate-400">
+                          ID: {youtubeResult.videoId}
+                        </span>
+                      </div>
+                      {youtubeResult.title && (
+                        <div className="font-semibold text-sm text-slate-100 break-words">
+                          {youtubeResult.title} · {youtubeResult.authorName}
+                        </div>
+                      )}
+                      <p className="leading-relaxed text-slate-300">{youtubeResult.explanation}</p>
+                      <button
+                        type="button"
+                        onClick={() => onChangeSourceType('uploaded')}
+                        className="min-h-[40px] px-3 py-1.5 rounded-lg bg-[#181F2C] hover:bg-[#212B3D] border border-[#2C374C] text-xs font-medium text-blue-300"
+                      >
+                        Switch to Uploaded MP4 for Facebook RTMP
+                      </button>
+                    </>
+                  ) : (
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                      <p className="leading-relaxed">{youtubeResult.explanation}</p>
                     </div>
                   )}
-                  <div className="flex items-start gap-2">
-                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                    <p className="leading-relaxed">{youtubeResult.explanation}</p>
-                  </div>
                 </div>
               )}
 
@@ -995,6 +1028,23 @@ export function LiveStudioView({
                 className="w-4 h-4 rounded border-[#2E384B] bg-[#0B0E14] text-blue-600 focus:ring-blue-500 shrink-0"
               />
             </label>
+          )}
+
+          {!isRtmpEligibleSource && (
+            <div className="p-3 rounded-xl bg-[#0E131B] border border-[#232B3A] text-xs text-slate-300 flex items-center justify-between gap-2.5">
+              <span className="leading-relaxed min-w-0">
+                {sourceType === 'youtube-preview'
+                  ? 'YouTube is Preview Only and cannot feed FFmpeg RTMP.'
+                  : 'Select an Uploaded Video or Direct URL to enable START LIVE.'}
+              </span>
+              <button
+                type="button"
+                onClick={() => onChangeSourceType('uploaded')}
+                className="min-h-[36px] px-2.5 py-1 rounded-lg bg-[#181F2C] hover:bg-[#222C3E] border border-[#2C374C] text-[11px] font-medium text-blue-300 whitespace-nowrap shrink-0"
+              >
+                Use Uploaded
+              </button>
+            </div>
           )}
 
           <div className="grid grid-cols-2 gap-2.5 pt-1">

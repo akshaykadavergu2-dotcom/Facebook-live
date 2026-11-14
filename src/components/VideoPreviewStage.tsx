@@ -123,16 +123,23 @@ export function VideoPreviewStage({
         videoId,
         playerVars: {
           autoplay: 0,
+          enablejsapi: 1,
           rel: 0,
           modestbranding: 1,
           playsinline: 1,
+          ...(typeof window !== 'undefined' && window.location?.origin
+            ? {
+                origin: window.location.origin,
+                widget_referrer: window.location.href,
+              }
+            : {}),
         },
         events: {
           onError: (e) => {
             if (!cancelled) {
               setYtError(
-                e.data === 101 || e.data === 150
-                  ? 'The video owner has disabled embedded playback for this YouTube video (Error 101/150).'
+                e.data === 101 || e.data === 150 || e.data === 153
+                  ? `YouTube embedded playback is restricted for this video or frame (Error ${e.data}). You can still open it on YouTube, or upload an MP4/MOV/WebM clip to broadcast via RTMP.`
                   : `YouTube IFrame Player reported playback error code ${e.data}.`,
               );
             }
@@ -237,9 +244,19 @@ export function VideoPreviewStage({
         <div className="w-full h-full relative bg-black">
           <div ref={ytContainerRef} className="w-full h-full" />
           {ytError && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0B0E14]/95 p-4 sm:p-6 text-center">
-              <AlertTriangle className="w-8 h-8 text-amber-400 mb-2.5" />
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0B0E14]/95 p-4 sm:p-6 text-center gap-3 z-20">
+              <AlertTriangle className="w-8 h-8 text-amber-400" />
               <p className="text-xs sm:text-sm font-medium text-slate-200 max-w-md">{ytError}</p>
+              {youtubeResult.watchUrl && (
+                <a
+                  href={youtubeResult.watchUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="min-h-[40px] px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold inline-flex items-center gap-1.5"
+                >
+                  <span>Watch on YouTube</span>
+                </a>
+              )}
             </div>
           )}
         </div>
@@ -298,11 +315,6 @@ export function VideoPreviewStage({
           <div className="flex items-center gap-1.5 bg-amber-500 text-slate-950 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded text-[10px] sm:text-[11px] font-semibold tracking-wider font-mono">
             <Tv className="w-3 h-3" />
             <span>CONNECTING</span>
-          </div>
-        ) : sourceType === 'youtube-preview' && youtubeResult?.valid ? (
-          <div className="flex items-center gap-1.5 bg-[#0B0E14]/90 border border-amber-500/40 text-amber-200 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded text-[10px] sm:text-[11px] font-medium">
-            <Play className="w-3 h-3 text-amber-400 shrink-0" />
-            <span>Preview Only · YouTube</span>
           </div>
         ) : (sourceType === 'camera' || sourceType === 'screen') && captureStream ? (
           <div className="flex items-center gap-1.5 bg-[#0B0E14]/90 border border-blue-500/40 text-blue-200 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded text-[10px] sm:text-[11px] font-medium">

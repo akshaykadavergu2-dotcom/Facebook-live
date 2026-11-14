@@ -13,10 +13,11 @@
     background-color: #0B0E14;
     color: #F1F5F9;
     letter-spacing: 0.005em;
-    overscroll-behavior-y: contain;
     -webkit-tap-highlight-color: transparent;
-    overflow-x: hidden;
+    overflow-x: clip;
     max-width: 100%;
+    height: auto;
+    min-height: 100%;
   }
 
   h1, h2, h3, h4 {
@@ -104,12 +105,14 @@
 
 
 /* Android mobile-first layout and touch targets */
-@media (max-width: 767px) {
+@media (max-width: 1023px) {
   html, body, #root {
     min-height: 100%;
     height: auto;
     width: 100%;
-    overflow-x: hidden;
+    overflow-x: clip;
+    overflow-y: visible;
+    -webkit-overflow-scrolling: touch;
   }
 
   body {
