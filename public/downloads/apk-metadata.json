@@ -5,10 +5,10 @@
   "buildVariant": "debug",
   "versionName": "1.0.0",
   "versionCode": 1,
-  "buildDateIso": "2026-11-14T05:51:49Z",
+  "buildDateIso": "2026-11-14T06:09:44Z",
   "sizeBytes": 6782810,
-  "sha256": "d024b3c620df76b4be97405375ea286a220af5b6472d71c0603c39ce923261b6",
-  "commitSha": "4194a77ef272f6d2ef66ca4174ad0e824a51bbda",
+  "sha256": "b04cfbbff34b2912d5960433529d9268813d273eac6cb1404a35d0408b93e09e",
+  "commitSha": "1167bc5d627569e38c133007eff40e3363959326",
   "downloadPath": "/downloads/livecast-companion.apk",
-  "workflowRunUrl": "https://github.com/akshaykadavergu2-dotcom/Facebook-live/actions/runs/43563316971"
+  "workflowRunUrl": "https://github.com/akshaykadavergu2-dotcom/Facebook-live/actions/runs/43564875234"
 }
