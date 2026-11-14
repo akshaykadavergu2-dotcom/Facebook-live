@@ -80,3 +80,31 @@
     animation: none !important;
   }
 }
+
+
+/* Android mobile-first layout and touch targets */
+@media (max-width: 767px) {
+  html, body, #root {
+    min-height: 100%;
+    height: auto;
+    width: 100%;
+    overflow-x: hidden;
+  }
+
+  body {
+    padding-bottom: env(safe-area-inset-bottom);
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  button, input, select, textarea {
+    touch-action: manipulation;
+  }
+
+  input, select, textarea {
+    font-size: 16px;
+  }
+
+  video, iframe {
+    max-width: 100%;
+  }
+}
