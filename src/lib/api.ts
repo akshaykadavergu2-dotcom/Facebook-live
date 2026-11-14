@@ -233,6 +233,7 @@ export const api = {
     requestJson<{
       valid: boolean;
       url: string;
+      protocol?: string;
       probe: {
         durationSec: number;
         width: number;

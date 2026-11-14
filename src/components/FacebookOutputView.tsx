@@ -83,8 +83,8 @@ export function FacebookOutputView({
         : 'No uploaded video selected'
       : sourceType === 'direct-url'
         ? directUrl.trim()
-          ? `Direct Media URL · ${directUrl.trim()}`
-          : 'No direct media URL entered'
+          ? `Direct / RTMP / SRT Feed · ${directUrl.trim()}`
+          : 'No direct media, RTMP, or SRT URL entered'
         : sourceType === 'youtube-preview'
           ? 'YouTube Preview Only (Cannot start FFmpeg RTMP)'
           : 'Local Browser Capture Preview Only (Record & upload to broadcast)';

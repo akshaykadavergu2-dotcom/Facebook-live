@@ -54,6 +54,12 @@ const INITIAL_OVERLAYS: OverlayConfig = {
   headlineBgColor: '#0F172A',
   headlineBgOpacity: 0.85,
   headlineAnimation: 'fade',
+  breakingNewsEnabled: false,
+  breakingNewsLabel: 'BREAKING NEWS',
+  breakingNewsText: 'Live studio coverage in progress.',
+  breakingNewsBgColor: '#DC2626',
+  breakingNewsTextColor: '#FFFFFF',
+  breakingNewsOpacity: 0.95,
   lowerThirdEnabled: false,
   lowerThirdTitle: 'LIVECAST STUDIO',
   lowerThirdSubtitle: 'Authorized Live Broadcast Feed',
@@ -61,6 +67,13 @@ const INITIAL_OVERLAYS: OverlayConfig = {
   lowerThirdBgColor: '#0B0E14',
   lowerThirdTextColor: '#F8FAFC',
   lowerThirdAnimation: 'slide',
+  clockEnabled: false,
+  clockPosition: 'top-right',
+  clockFormat: 'date-time',
+  clockFontSize: 18,
+  clockColor: '#F8FAFC',
+  clockBgColor: '#0B0E14',
+  clockBgOpacity: 0.85,
   tickerEnabled: false,
   tickerText: 'Welcome to the live broadcast. Stay tuned for updates and upcoming segments.',
   tickerFontSize: 20,
@@ -431,9 +444,6 @@ export default function App() {
             <YouTubePreviewView
               youtubeResult={youtubeResult}
               onYouTubeValidated={setYoutubeResult}
-              overlays={overlays}
-              streamStatus={telemetry.status}
-              onUseInStudioMonitor={() => setSourceType('youtube-preview')}
               onNavigate={setSection}
             />
           )}
@@ -445,7 +455,6 @@ export default function App() {
               sourceType={sourceType}
               selectedVideo={selectedVideo}
               directUrl={directUrl}
-              youtubeResult={youtubeResult}
               streamStatus={telemetry.status}
             />
           )}

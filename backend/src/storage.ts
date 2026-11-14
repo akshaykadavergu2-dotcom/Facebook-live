@@ -46,6 +46,13 @@ export const DEFAULT_OVERLAY_CONFIG: OverlayConfig = {
   headlineBgOpacity: 0.85,
   headlineAnimation: 'fade',
 
+  breakingNewsEnabled: false,
+  breakingNewsLabel: 'BREAKING NEWS',
+  breakingNewsText: 'Live studio coverage in progress.',
+  breakingNewsBgColor: '#DC2626',
+  breakingNewsTextColor: '#FFFFFF',
+  breakingNewsOpacity: 0.95,
+
   lowerThirdEnabled: false,
   lowerThirdTitle: 'LIVECAST STUDIO',
   lowerThirdSubtitle: 'Authorized Live Broadcast Feed',
@@ -53,6 +60,14 @@ export const DEFAULT_OVERLAY_CONFIG: OverlayConfig = {
   lowerThirdBgColor: '#0B0E14',
   lowerThirdTextColor: '#F8FAFC',
   lowerThirdAnimation: 'slide',
+
+  clockEnabled: false,
+  clockPosition: 'top-right',
+  clockFormat: 'date-time',
+  clockFontSize: 18,
+  clockColor: '#F8FAFC',
+  clockBgColor: '#0B0E14',
+  clockBgOpacity: 0.85,
 
   tickerEnabled: false,
   tickerText: 'Welcome to the live broadcast. Stay tuned for updates and upcoming segments.',

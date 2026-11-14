@@ -41,6 +41,8 @@ const QUALITY_PROFILES: Record<
 
 function findSystemFont(): string | null {
   const candidates = [
+    '/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf',
+    '/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf',
     '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
     '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
     '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
@@ -89,12 +91,18 @@ function parseFrameRate(raw: string | undefined): number {
   return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : 30;
 }
 
+function isLiveNetworkStreamUrl(target: string): boolean {
+  return /^(rtmps?|srt):\/\//i.test(target) || /\.m3u8(\?|$)/i.test(target);
+}
+
 export async function probeMedia(targetPathOrUrl: string): Promise<MediaProbeResult> {
-  const { stdout } = await execFileAsync(
-    'ffprobe',
-    ['-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', targetPathOrUrl],
-    { timeout: 12000 },
-  );
+  const ffprobeArgs = ['-v', 'quiet'];
+  if (/^(https?|rtmps?|srt):\/\//i.test(targetPathOrUrl)) {
+    ffprobeArgs.push('-analyzeduration', '3500000', '-probesize', '3500000');
+  }
+  ffprobeArgs.push('-print_format', 'json', '-show_format', '-show_streams', targetPathOrUrl);
+
+  const { stdout } = await execFileAsync('ffprobe', ffprobeArgs, { timeout: 14000 });
   const parsed = JSON.parse(stdout) as {
     format?: { duration?: string };
     streams?: Array<{
@@ -208,10 +216,15 @@ function isPrivateOrLoopbackHost(hostname: string): boolean {
   return false;
 }
 
-export function validateDirectMediaUrl(rawUrl: string): { valid: boolean; normalized?: string; error?: string } {
+export function validateDirectMediaUrl(rawUrl: string): {
+  valid: boolean;
+  normalized?: string;
+  protocol?: 'http' | 'https' | 'rtmp' | 'rtmps' | 'srt';
+  error?: string;
+} {
   const trimmed = rawUrl.trim();
   if (!trimmed) {
-    return { valid: false, error: 'Direct media URL is required.' };
+    return { valid: false, error: 'Direct media, HLS, RTMP, or SRT URL is required.' };
   }
   if (/[\s\r\n\0]/.test(trimmed)) {
     return { valid: false, error: 'Media URL must not contain spaces or control characters.' };
@@ -220,22 +233,30 @@ export function validateDirectMediaUrl(rawUrl: string): { valid: boolean; normal
   try {
     parsed = new URL(trimmed);
   } catch {
-    return { valid: false, error: 'Invalid URL format. Enter a full https:// or http:// media URL.' };
+    return {
+      valid: false,
+      error: 'Invalid URL format. Enter a full https://, http://, rtmp://, rtmps://, or srt:// URL.',
+    };
   }
-  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-    return { valid: false, error: 'Only http:// and https:// direct media URLs are supported.' };
+  const proto = parsed.protocol.replace(/:$/, '').toLowerCase();
+  if (proto !== 'https' && proto !== 'http' && proto !== 'rtmp' && proto !== 'rtmps' && proto !== 'srt') {
+    return {
+      valid: false,
+      error: 'Only http://, https://, rtmp://, rtmps://, and srt:// authorized feeds are supported.',
+    };
   }
   const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
   if (
     host === 'youtube.com' ||
     host === 'youtu.be' ||
     host === 'm.youtube.com' ||
+    host === 'music.youtube.com' ||
     host === 'youtube-nocookie.com'
   ) {
     return {
       valid: false,
       error:
-        'YouTube share links cannot be streamed via FFmpeg RTMP. Use the YouTube Preview panel for preview, or select an authorized direct MP4/HLS media URL.',
+        'YouTube share links cannot be streamed via FFmpeg RTMP. Use the YouTube Preview monitor for preview, or select an authorized MP4/HLS/RTMP/SRT feed.',
     };
   }
   if (isPrivateOrLoopbackHost(parsed.hostname)) {
@@ -244,7 +265,11 @@ export function validateDirectMediaUrl(rawUrl: string): { valid: boolean; normal
       error: 'Private network or loopback URLs are blocked for security.',
     };
   }
-  return { valid: true, normalized: parsed.toString() };
+  return {
+    valid: true,
+    normalized: trimmed,
+    protocol: proto as 'http' | 'https' | 'rtmp' | 'rtmps' | 'srt',
+  };
 }
 
 function escapeFilterPath(filePath: string): string {
@@ -283,7 +308,16 @@ export function buildFilterGraph(
   );
 
   const scaleFactor = height / 720;
-  const tickerBarH = overlays.tickerEnabled ? Math.round(44 * scaleFactor) : 0;
+  const tickerBarH = overlays.tickerEnabled && overlays.tickerText.trim().length > 0 ? Math.round(44 * scaleFactor) : 0;
+  const hasBreakingBanner =
+    overlays.breakingNewsEnabled &&
+    (overlays.breakingNewsLabel.trim().length > 0 || overlays.breakingNewsText.trim().length > 0);
+  const breakingBarH = hasBreakingBanner ? Math.round(42 * scaleFactor) : 0;
+  const bottomStackH = tickerBarH + breakingBarH;
+
+  const hasHeadlineBar = overlays.headlineEnabled && overlays.headlineText.trim().length > 0;
+  const headlineSizeScaled = Math.round(Math.min(64, Math.max(16, overlays.headlineFontSize)) * scaleFactor);
+  const headlineBoxH = hasHeadlineBar ? Math.round(headlineSizeScaled * 1.75) : 0;
 
   if (hasLogoInput) {
     const logoWidth = Math.max(48, Math.round(width * (Math.min(35, Math.max(5, overlays.logoScale)) / 100)));
@@ -291,14 +325,15 @@ export function buildFilterGraph(
     filters.push(`[1:v]scale=${logoWidth}:-1,format=rgba,colorchannelmixer=aa=${opacity}[logo_img]`);
 
     const margin = Math.round(24 * scaleFactor);
-    const bottomY = `H-h-${margin + tickerBarH}`;
-    let posExpr = `W-w-${margin}:${margin}`;
+    const topMargin = hasHeadlineBar ? Math.round(24 * scaleFactor) + headlineBoxH + Math.round(10 * scaleFactor) : margin;
+    const bottomY = `H-h-${margin + bottomStackH}`;
+    let posExpr = `W-w-${margin}:${topMargin}`;
     switch (overlays.logoPosition) {
       case 'top-left':
-        posExpr = `${margin}:${margin}`;
+        posExpr = `${margin}:${topMargin}`;
         break;
       case 'top-right':
-        posExpr = `W-w-${margin}:${margin}`;
+        posExpr = `W-w-${margin}:${topMargin}`;
         break;
       case 'bottom-left':
         posExpr = `${margin}:${bottomY}`;
@@ -317,10 +352,8 @@ export function buildFilterGraph(
 
   const textStages: string[] = [];
 
-  if (overlays.headlineEnabled && overlays.headlineText.trim().length > 0) {
+  if (hasHeadlineBar) {
     const headlineFile = writeOverlayTextFile('headline', overlays.headlineText);
-    const fSize = Math.round(Math.min(64, Math.max(16, overlays.headlineFontSize)) * scaleFactor);
-    const boxH = Math.round(fSize * 1.75);
     const padX = Math.round(24 * scaleFactor);
     const padY = Math.round(24 * scaleFactor);
     const bgColor = sanitizeHexColor(overlays.headlineBgColor, '0x0F172A');
@@ -328,10 +361,10 @@ export function buildFilterGraph(
     const textColor = sanitizeHexColor(overlays.headlineColor, '0xFFFFFF');
 
     if (Number(bgAlpha) > 0) {
-      textStages.push(`drawbox=x=${padX}:y=${padY}:w=iw-${padX * 2}:h=${boxH}:color=${bgColor}@${bgAlpha}:t=fill`);
+      textStages.push(`drawbox=x=${padX}:y=${padY}:w=iw-${padX * 2}:h=${headlineBoxH}:color=${bgColor}@${bgAlpha}:t=fill`);
     }
     textStages.push(
-      `drawtext=${fontArg}expansion=none:textfile='${escapeFilterPath(headlineFile)}':fontsize=${fSize}:fontcolor=${textColor}:x=${padX + Math.round(16 * scaleFactor)}:y=${padY + Math.round((boxH - fSize) / 2)}`,
+      `drawtext=${fontArg}expansion=none:textfile='${escapeFilterPath(headlineFile)}':fontsize=${headlineSizeScaled}:fontcolor=${textColor}:x=${padX + Math.round(16 * scaleFactor)}:y=${padY + Math.round((headlineBoxH - headlineSizeScaled) / 2)}`,
     );
   }
 
@@ -342,7 +375,7 @@ export function buildFilterGraph(
     const boxW = Math.round(540 * scaleFactor);
     const boxH = Math.round(78 * scaleFactor);
     const marginX = Math.round(28 * scaleFactor);
-    const boxY = height - tickerBarH - boxH - Math.round(24 * scaleFactor);
+    const boxY = height - bottomStackH - boxH - Math.round(20 * scaleFactor);
     const stripeW = Math.round(6 * scaleFactor);
     const accentColor = sanitizeHexColor(overlays.lowerThirdAccentColor, '0x2563EB');
     const bgColor = sanitizeHexColor(overlays.lowerThirdBgColor, '0x0B0E14');
@@ -367,7 +400,80 @@ export function buildFilterGraph(
     }
   }
 
-  if (overlays.tickerEnabled && overlays.tickerText.trim().length > 0) {
+  if (hasBreakingBanner) {
+    const padX = Math.round(24 * scaleFactor);
+    const bannerY = height - tickerBarH - breakingBarH - (tickerBarH > 0 ? Math.round(4 * scaleFactor) : Math.round(16 * scaleFactor));
+    const tagW = Math.round(186 * scaleFactor);
+    const bannerAlpha = Math.min(1, Math.max(0.2, overlays.breakingNewsOpacity)).toFixed(2);
+    const badgeColor = sanitizeHexColor(overlays.breakingNewsBgColor, '0xDC2626');
+    const txtColor = sanitizeHexColor(overlays.breakingNewsTextColor, '0xFFFFFF');
+    const fSize = Math.round(18 * scaleFactor);
+
+    textStages.push(`drawbox=x=${padX}:y=${bannerY}:w=iw-${padX * 2}:h=${breakingBarH}:color=0x0B0E14@${bannerAlpha}:t=fill`);
+    textStages.push(`drawbox=x=${padX}:y=${bannerY}:w=${tagW}:h=${breakingBarH}:color=${badgeColor}@${bannerAlpha}:t=fill`);
+
+    const labelText = overlays.breakingNewsLabel.trim() || 'BREAKING NEWS';
+    const labelFile = writeOverlayTextFile('breaking-label', labelText);
+    textStages.push(
+      `drawtext=${fontArg}expansion=none:textfile='${escapeFilterPath(labelFile)}':fontsize=${Math.round(15 * scaleFactor)}:fontcolor=${txtColor}:x=${padX + Math.round(14 * scaleFactor)}:y=${bannerY + Math.round((breakingBarH - 15 * scaleFactor) / 2)}`,
+    );
+
+    if (overlays.breakingNewsText.trim()) {
+      const newsFile = writeOverlayTextFile('breaking-text', overlays.breakingNewsText);
+      textStages.push(
+        `drawtext=${fontArg}expansion=none:textfile='${escapeFilterPath(newsFile)}':fontsize=${fSize}:fontcolor=${txtColor}:x=${padX + tagW + Math.round(16 * scaleFactor)}:y=${bannerY + Math.round((breakingBarH - fSize) / 2)}`,
+      );
+    }
+  }
+
+  if (overlays.clockEnabled) {
+    const fSize = Math.round(Math.min(36, Math.max(12, overlays.clockFontSize)) * scaleFactor);
+    const margin = Math.round(24 * scaleFactor);
+    const topY = hasHeadlineBar ? Math.round(24 * scaleFactor) + headlineBoxH + Math.round(10 * scaleFactor) : margin;
+    const bottomY = `h-th-${margin + bottomStackH + Math.round(8 * scaleFactor)}`;
+    const clockBg = sanitizeHexColor(overlays.clockBgColor, '0x0B0E14');
+    const clockBgAlpha = Math.min(1, Math.max(0, overlays.clockBgOpacity)).toFixed(2);
+    const clockTxt = sanitizeHexColor(overlays.clockColor, '0xF8FAFC');
+
+    let localtimeExpr = '%{localtime\\:%d %b %Y  %H\\\\\\:%M\\\\\\:%S}';
+    if (overlays.clockFormat === 'time-24h') {
+      localtimeExpr = '%{localtime\\:%H\\\\\\:%M\\\\\\:%S}';
+    } else if (overlays.clockFormat === 'time-12h') {
+      localtimeExpr = '%{localtime\\:%I\\\\\\:%M\\\\\\:%S %p}';
+    }
+
+    let xExpr = `w-tw-${margin}`;
+    let yExpr = `${topY}`;
+    switch (overlays.clockPosition) {
+      case 'top-left':
+        xExpr = `${margin}`;
+        yExpr = `${topY}`;
+        break;
+      case 'top-right':
+        xExpr = `w-tw-${margin}`;
+        yExpr = `${topY}`;
+        break;
+      case 'bottom-left':
+        xExpr = `${margin}`;
+        yExpr = bottomY;
+        break;
+      case 'bottom-right':
+        xExpr = `w-tw-${margin}`;
+        yExpr = bottomY;
+        break;
+    }
+
+    const boxArgs =
+      Number(clockBgAlpha) > 0
+        ? `:box=1:boxcolor=${clockBg}@${clockBgAlpha}:boxborderw=${Math.round(8 * scaleFactor)}`
+        : '';
+
+    textStages.push(
+      `drawtext=${fontArg}expansion=normal:text='${localtimeExpr}':fontsize=${fSize}:fontcolor=${clockTxt}:x=${xExpr}:y=${yExpr}${boxArgs}`,
+    );
+  }
+
+  if (tickerBarH > 0) {
     const tickerFile = writeOverlayTextFile('ticker', overlays.tickerText);
     const fSize = Math.round(Math.min(36, Math.max(14, overlays.tickerFontSize)) * scaleFactor);
     const bgColor = sanitizeHexColor(overlays.tickerBgColor, '0x1E293B');
@@ -530,7 +636,10 @@ class StreamManager extends EventEmitter {
     );
 
     const filterComplex = buildFilterGraph(profile.width, profile.height, options.overlays, hasLogoInput);
-    const args: string[] = ['-hide_banner', '-loglevel', 'info', '-re'];
+    const args: string[] = ['-hide_banner', '-loglevel', 'info'];
+    if (options.isLocalFile || !isLiveNetworkStreamUrl(options.inputTarget)) {
+      args.push('-re');
+    }
 
     if (options.isLocalFile && options.loopVideo) {
       args.push('-stream_loop', '-1');

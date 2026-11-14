@@ -4,6 +4,8 @@ export type StreamQualityProfile = '720p' | '1080p';
 
 export type LogoPosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
 
+export type ClockFormat = 'date-time' | 'time-24h' | 'time-12h';
+
 export type OverlayAnimation = 'static' | 'fade' | 'slide' | 'scroll';
 
 export type VideoSourceType = 'uploaded' | 'direct-url' | 'youtube-preview';
@@ -24,6 +26,13 @@ export interface OverlayConfig {
   headlineBgOpacity: number;
   headlineAnimation: Exclude<OverlayAnimation, 'scroll'>;
 
+  breakingNewsEnabled: boolean;
+  breakingNewsLabel: string;
+  breakingNewsText: string;
+  breakingNewsBgColor: string;
+  breakingNewsTextColor: string;
+  breakingNewsOpacity: number;
+
   lowerThirdEnabled: boolean;
   lowerThirdTitle: string;
   lowerThirdSubtitle: string;
@@ -31,6 +40,14 @@ export interface OverlayConfig {
   lowerThirdBgColor: string;
   lowerThirdTextColor: string;
   lowerThirdAnimation: Exclude<OverlayAnimation, 'scroll'>;
+
+  clockEnabled: boolean;
+  clockPosition: LogoPosition;
+  clockFormat: ClockFormat;
+  clockFontSize: number;
+  clockColor: string;
+  clockBgColor: string;
+  clockBgOpacity: number;
 
   tickerEnabled: boolean;
   tickerText: string;

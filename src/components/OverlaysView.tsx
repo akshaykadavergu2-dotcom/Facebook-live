@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ImagePlus, Save, Trash2 } from 'lucide-react';
 import type {
+  ClockFormat,
   LogoPosition,
   OverlayConfig,
   StreamStatusState,
   VideoAsset,
-  VideoSourceType,
-  YouTubeValidationResult,
 } from '../../shared/types';
 import { api } from '../lib/api';
 import { VideoPreviewStage, type ProgramMonitorSource } from './VideoPreviewStage';
@@ -17,7 +16,6 @@ interface OverlaysViewProps {
   sourceType: ProgramMonitorSource;
   selectedVideo: VideoAsset | null;
   directUrl: string;
-  youtubeResult: YouTubeValidationResult | null;
   streamStatus: StreamStatusState;
 }
 
@@ -27,7 +25,6 @@ export function OverlaysView({
   sourceType,
   selectedVideo,
   directUrl,
-  youtubeResult,
   streamStatus,
 }: OverlaysViewProps) {
   const logoInputRef = useRef<HTMLInputElement | null>(null);
@@ -55,7 +52,7 @@ export function OverlaysView({
       onOverlaysUpdated(saved);
       setStatusMsg({
         type: 'ok',
-        text: 'Overlays saved on backend and ready for FFmpeg broadcast rendering.',
+        text: 'Overlays saved on backend and burned into Facebook Program Output on broadcast start.',
       });
     } catch (err) {
       setStatusMsg({
@@ -105,15 +102,20 @@ export function OverlaysView({
     }
   };
 
+  const programSource: ProgramMonitorSource =
+    sourceType === 'youtube-preview' ? 'uploaded' : sourceType;
+
   return (
     <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start min-w-0">
-      <div className="xl:col-span-7 space-y-4 min-w-0">
+      <div className="xl:col-span-7 space-y-4 min-w-0 xl:sticky xl:top-6">
         <section className="bg-[#121721] border border-[#232B3A] rounded-2xl p-4 sm:p-5 space-y-4 min-w-0">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
-              <h2 className="text-base font-semibold text-slate-100">Live Graphics Preview Stage</h2>
+              <h2 className="text-base font-semibold text-slate-100">
+                Facebook Program Output Overlay Stage
+              </h2>
               <p className="text-xs text-slate-400">
-                Changes preview immediately and burn into the FFmpeg output stream on next broadcast start.
+                Renders live on Monitor B and burns directly into FFmpeg RTMPS Facebook output.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2 shrink-0">
@@ -122,7 +124,7 @@ export function OverlaysView({
                 onClick={() => setShowOverlayPreview((v) => !v)}
                 className="min-h-[44px] px-3.5 py-2 rounded-xl border border-[#2C374C] bg-[#181F2C] hover:bg-[#222C3E] text-slate-200 text-xs font-medium whitespace-nowrap"
               >
-                {showOverlayPreview ? 'Hide Preview' : 'Show Preview'}
+                {showOverlayPreview ? 'Hide Overlays' : 'Preview Overlays'}
               </button>
               <button
                 type="button"
@@ -137,10 +139,9 @@ export function OverlaysView({
           </div>
 
           <VideoPreviewStage
-            sourceType={sourceType}
+            sourceType={programSource}
             selectedVideo={selectedVideo}
             directUrl={directUrl}
-            youtubeResult={youtubeResult}
             overlays={draft}
             streamStatus={streamStatus}
             showOverlays={showOverlayPreview}
@@ -148,7 +149,7 @@ export function OverlaysView({
 
           {statusMsg && (
             <div
-              className={`p-3 rounded-md border text-xs flex items-center gap-2 ${
+              className={`p-3 rounded-xl border text-xs flex items-center gap-2 ${
                 statusMsg.type === 'ok'
                   ? 'bg-emerald-950/25 border-emerald-500/35 text-emerald-200'
                   : 'bg-rose-950/25 border-rose-500/35 text-rose-200'
@@ -166,6 +167,7 @@ export function OverlaysView({
       </div>
 
       <div className="xl:col-span-5 space-y-5 min-w-0">
+        {/* 01. Corner Logo */}
         <section className="bg-[#121721] border border-[#232B3A] rounded-2xl p-4 sm:p-5 space-y-4 min-w-0">
           <div className="flex items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-slate-100">01. Corner Logo (Transparent PNG)</h3>
@@ -253,9 +255,10 @@ export function OverlaysView({
           </div>
         </section>
 
+        {/* 02. Headline Text */}
         <section className="bg-[#121721] border border-[#232B3A] rounded-2xl p-4 sm:p-5 space-y-3 min-w-0">
           <div className="flex items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold text-slate-100">02. Breaking News Headline</h3>
+            <h3 className="text-sm font-semibold text-slate-100">02. Headline Text Banner</h3>
             <label className="min-h-[44px] flex items-center gap-2 text-xs text-slate-300 cursor-pointer shrink-0">
               <input
                 type="checkbox"
@@ -271,7 +274,7 @@ export function OverlaysView({
             type="text"
             value={draft.headlineText}
             onChange={(e) => updateField('headlineText', e.target.value)}
-            placeholder="Headline text..."
+            placeholder="Top headline bar text..."
             className="w-full min-h-[44px] bg-[#0B0E14] border border-[#263042] rounded-xl px-3 py-2 text-xs text-slate-100"
           />
 
@@ -338,9 +341,167 @@ export function OverlaysView({
           </div>
         </section>
 
+        {/* 03. Breaking News Banner */}
         <section className="bg-[#121721] border border-[#232B3A] rounded-2xl p-4 sm:p-5 space-y-3 min-w-0">
           <div className="flex items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold text-slate-100">03. Lower-Third News Graphic</h3>
+            <h3 className="text-sm font-semibold text-slate-100">03. Breaking News Banner</h3>
+            <label className="min-h-[44px] flex items-center gap-2 text-xs text-slate-300 cursor-pointer shrink-0">
+              <input
+                type="checkbox"
+                checked={draft.breakingNewsEnabled}
+                onChange={(e) => updateField('breakingNewsEnabled', e.target.checked)}
+                className="w-4 h-4 rounded border-[#2E384B] bg-[#0B0E14] text-blue-600"
+              />
+              <span>Enabled</span>
+            </label>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            <input
+              type="text"
+              value={draft.breakingNewsLabel}
+              onChange={(e) => updateField('breakingNewsLabel', e.target.value)}
+              placeholder="BREAKING NEWS"
+              className="w-full min-h-[44px] bg-[#0B0E14] border border-[#263042] rounded-xl px-3 py-2 text-xs font-bold uppercase text-slate-100"
+            />
+            <input
+              type="text"
+              value={draft.breakingNewsText}
+              onChange={(e) => updateField('breakingNewsText', e.target.value)}
+              placeholder="Live update headline text..."
+              className="sm:col-span-2 w-full min-h-[44px] bg-[#0B0E14] border border-[#263042] rounded-xl px-3 py-2 text-xs text-slate-100"
+            />
+          </div>
+
+          <div className="grid grid-cols-3 gap-2.5 items-center">
+            <div>
+              <label className="block text-[11px] text-slate-400 mb-1">Badge Color</label>
+              <input
+                type="color"
+                value={draft.breakingNewsBgColor}
+                onChange={(e) => updateField('breakingNewsBgColor', e.target.value)}
+                className="w-full h-11 bg-[#0B0E14] border border-[#263042] rounded-xl cursor-pointer"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] text-slate-400 mb-1">Text Color</label>
+              <input
+                type="color"
+                value={draft.breakingNewsTextColor}
+                onChange={(e) => updateField('breakingNewsTextColor', e.target.value)}
+                className="w-full h-11 bg-[#0B0E14] border border-[#263042] rounded-xl cursor-pointer"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] text-slate-400 mb-1">
+                Opacity ({Math.round(draft.breakingNewsOpacity * 100)}%)
+              </label>
+              <input
+                type="range"
+                min={20}
+                max={100}
+                value={Math.round(draft.breakingNewsOpacity * 100)}
+                onChange={(e) => updateField('breakingNewsOpacity', Number(e.target.value) / 100)}
+                className="w-full accent-blue-600 mt-2"
+              />
+            </div>
+          </div>
+        </section>
+
+        {/* 04. Date & Live Clock */}
+        <section className="bg-[#121721] border border-[#232B3A] rounded-2xl p-4 sm:p-5 space-y-3 min-w-0">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-slate-100">04. Date &amp; Live Clock</h3>
+            <label className="min-h-[44px] flex items-center gap-2 text-xs text-slate-300 cursor-pointer shrink-0">
+              <input
+                type="checkbox"
+                checked={draft.clockEnabled}
+                onChange={(e) => updateField('clockEnabled', e.target.checked)}
+                className="w-4 h-4 rounded border-[#2E384B] bg-[#0B0E14] text-blue-600"
+              />
+              <span>Enabled</span>
+            </label>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[11px] text-slate-400 mb-1">Corner Position</label>
+              <select
+                value={draft.clockPosition}
+                onChange={(e) => updateField('clockPosition', e.target.value as LogoPosition)}
+                className="w-full min-h-[44px] bg-[#0B0E14] border border-[#263042] rounded-xl px-3 py-2 text-xs text-slate-100"
+              >
+                <option value="top-left">Top Left</option>
+                <option value="top-right">Top Right</option>
+                <option value="bottom-left">Bottom Left</option>
+                <option value="bottom-right">Bottom Right</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-[11px] text-slate-400 mb-1">Display Format</label>
+              <select
+                value={draft.clockFormat}
+                onChange={(e) => updateField('clockFormat', e.target.value as ClockFormat)}
+                className="w-full min-h-[44px] bg-[#0B0E14] border border-[#263042] rounded-xl px-3 py-2 text-xs text-slate-100"
+              >
+                <option value="date-time">Date + Live Time (24h)</option>
+                <option value="time-24h">Live Time Only (24h)</option>
+                <option value="time-12h">Live Time Only (12h AM/PM)</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2.5">
+            <div>
+              <label className="block text-[11px] text-slate-400 mb-1">Font Size</label>
+              <input
+                type="number"
+                min={12}
+                max={36}
+                value={draft.clockFontSize}
+                onChange={(e) => updateField('clockFontSize', Number(e.target.value))}
+                className="w-full min-h-[44px] bg-[#0B0E14] border border-[#263042] rounded-xl px-2.5 py-1.5 text-xs font-mono text-slate-100"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] text-slate-400 mb-1">Text Color</label>
+              <input
+                type="color"
+                value={draft.clockColor}
+                onChange={(e) => updateField('clockColor', e.target.value)}
+                className="w-full h-11 bg-[#0B0E14] border border-[#263042] rounded-xl cursor-pointer"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] text-slate-400 mb-1">Plate Color</label>
+              <input
+                type="color"
+                value={draft.clockBgColor}
+                onChange={(e) => updateField('clockBgColor', e.target.value)}
+                className="w-full h-11 bg-[#0B0E14] border border-[#263042] rounded-xl cursor-pointer"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-[11px] text-slate-400 mb-1">
+              Clock Background Opacity ({Math.round(draft.clockBgOpacity * 100)}%)
+            </label>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={Math.round(draft.clockBgOpacity * 100)}
+              onChange={(e) => updateField('clockBgOpacity', Number(e.target.value) / 100)}
+              className="w-full accent-blue-600"
+            />
+          </div>
+        </section>
+
+        {/* 05. Lower-Third Graphic */}
+        <section className="bg-[#121721] border border-[#232B3A] rounded-2xl p-4 sm:p-5 space-y-3 min-w-0">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-slate-100">05. Lower-Third News Graphic</h3>
             <label className="min-h-[44px] flex items-center gap-2 text-xs text-slate-300 cursor-pointer shrink-0">
               <input
                 type="checkbox"
@@ -403,9 +564,10 @@ export function OverlaysView({
           </div>
         </section>
 
+        {/* 06. Scrolling Ticker */}
         <section className="bg-[#121721] border border-[#232B3A] rounded-2xl p-4 sm:p-5 space-y-3 min-w-0">
           <div className="flex items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold text-slate-100">04. Scrolling News Ticker</h3>
+            <h3 className="text-sm font-semibold text-slate-100">06. Scrolling News Ticker</h3>
             <label className="min-h-[44px] flex items-center gap-2 text-xs text-slate-300 cursor-pointer shrink-0">
               <input
                 type="checkbox"

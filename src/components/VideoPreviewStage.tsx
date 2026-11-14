@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Film, Play, AlertTriangle, Tv, Camera, MonitorSmartphone } from 'lucide-react';
+import { Film, AlertTriangle, Tv, Camera, MonitorSmartphone, Radio } from 'lucide-react';
 import type {
   OverlayConfig,
   StreamStatusState,
@@ -11,37 +11,25 @@ import { resolveMediaUrl } from '../lib/api';
 
 export type ProgramMonitorSource = VideoSourceType | 'camera' | 'screen';
 
-declare global {
-  interface Window {
-    YT?: {
-      Player: new (
-        element: HTMLElement | string,
-        options: {
-          videoId: string;
-          playerVars?: Record<string, string | number>;
-          events?: {
-            onReady?: () => void;
-            onError?: (e: { data: number }) => void;
-          };
-        },
-      ) => {
-        destroy: () => void;
-      };
-    };
-    onYouTubeIframeAPIReady?: () => void;
-  }
+export interface VideoPlaybackMeta {
+  playbackStatus: 'Idle' | 'Ready' | 'Playing' | 'Paused' | 'Buffering' | 'Ended' | 'External Pull';
+  width: number;
+  height: number;
+  durationSec: number;
+  muted: boolean;
 }
 
 interface VideoPreviewStageProps {
   sourceType: ProgramMonitorSource;
   selectedVideo: VideoAsset | null;
   directUrl: string;
-  youtubeResult: YouTubeValidationResult | null;
+  youtubeResult?: YouTubeValidationResult | null;
   captureStream?: MediaStream | null;
   overlays: OverlayConfig;
   streamStatus: StreamStatusState;
   showOverlays?: boolean;
   loopVideo?: boolean;
+  onPlaybackMetaChange?: (meta: VideoPlaybackMeta) => void;
 }
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -53,26 +41,113 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
+function formatClockDisplay(now: Date, format: OverlayConfig['clockFormat']): string {
+  if (format === 'time-24h') {
+    return now.toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
+  }
+  if (format === 'time-12h') {
+    return now.toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+    });
+  }
+  const datePart = now.toLocaleDateString([], {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+  const timePart = now.toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+  return `${datePart}  ${timePart}`;
+}
+
 export function VideoPreviewStage({
   sourceType,
   selectedVideo,
   directUrl,
-  youtubeResult,
   captureStream = null,
   overlays,
   streamStatus,
   showOverlays = true,
   loopVideo = true,
+  onPlaybackMetaChange,
 }: VideoPreviewStageProps) {
-  const ytContainerRef = useRef<HTMLDivElement | null>(null);
-  const ytPlayerRef = useRef<{ destroy: () => void } | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const captureVideoRef = useRef<HTMLVideoElement | null>(null);
-  const [ytError, setYtError] = useState<string | null>(null);
   const [mediaError, setMediaError] = useState<string | null>(null);
+  const [now, setNow] = useState<Date>(() => new Date());
+
+  const trimmedDirectUrl = directUrl.trim();
+  const isPullProtocolUrl = /^(rtmps?|srt):\/\//i.test(trimmedDirectUrl);
+
+  useEffect(() => {
+    if (!overlays.clockEnabled || !showOverlays) return;
+    setNow(new Date());
+    const id = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(id);
+  }, [overlays.clockEnabled, showOverlays]);
 
   useEffect(() => {
     setMediaError(null);
-  }, [sourceType, selectedVideo?.id, directUrl]);
+  }, [sourceType, selectedVideo?.id, trimmedDirectUrl]);
+
+  useEffect(() => {
+    if (!onPlaybackMetaChange) return;
+    if (sourceType === 'uploaded' && selectedVideo) {
+      onPlaybackMetaChange({
+        playbackStatus: 'Ready',
+        width: selectedVideo.width,
+        height: selectedVideo.height,
+        durationSec: selectedVideo.durationSec,
+        muted: false,
+      });
+    } else if (sourceType === 'direct-url' && trimmedDirectUrl) {
+      onPlaybackMetaChange({
+        playbackStatus: isPullProtocolUrl ? 'External Pull' : 'Ready',
+        width: 0,
+        height: 0,
+        durationSec: 0,
+        muted: false,
+      });
+    } else if ((sourceType === 'camera' || sourceType === 'screen') && captureStream) {
+      onPlaybackMetaChange({
+        playbackStatus: 'Playing',
+        width: 1280,
+        height: 720,
+        durationSec: 0,
+        muted: true,
+      });
+    } else {
+      onPlaybackMetaChange({
+        playbackStatus: 'Idle',
+        width: 0,
+        height: 0,
+        durationSec: 0,
+        muted: false,
+      });
+    }
+  }, [
+    sourceType,
+    selectedVideo?.id,
+    selectedVideo?.width,
+    selectedVideo?.height,
+    selectedVideo?.durationSec,
+    trimmedDirectUrl,
+    isPullProtocolUrl,
+    captureStream,
+    onPlaybackMetaChange,
+  ]);
 
   useEffect(() => {
     const el = captureVideoRef.current;
@@ -87,110 +162,49 @@ export function VideoPreviewStage({
     }
   }, [sourceType, captureStream]);
 
-  useEffect(() => {
-    if (sourceType !== 'youtube-preview' || !youtubeResult?.valid || !youtubeResult.videoId) {
-      if (ytPlayerRef.current) {
-        try {
-          ytPlayerRef.current.destroy();
-        } catch {
-          // ignore
-        }
-        ytPlayerRef.current = null;
-      }
-      setYtError(null);
-      return;
-    }
+  const emitVideoMeta = (status: VideoPlaybackMeta['playbackStatus']) => {
+    if (!onPlaybackMetaChange) return;
+    const el = videoRef.current;
+    onPlaybackMetaChange({
+      playbackStatus: status,
+      width: el?.videoWidth || selectedVideo?.width || 0,
+      height: el?.videoHeight || selectedVideo?.height || 0,
+      durationSec:
+        el && Number.isFinite(el.duration) && el.duration > 0
+          ? el.duration
+          : selectedVideo?.durationSec || 0,
+      muted: Boolean(el?.muted),
+    });
+  };
 
-    let cancelled = false;
-    const videoId = youtubeResult.videoId;
-    setYtError(null);
+  const tickerHeightPx =
+    overlays.tickerEnabled && overlays.tickerText.trim().length > 0 ? 30 : 0;
+  const hasBreakingBanner =
+    overlays.breakingNewsEnabled &&
+    (overlays.breakingNewsLabel.trim().length > 0 || overlays.breakingNewsText.trim().length > 0);
+  const breakingHeightPx = hasBreakingBanner ? 28 : 0;
+  const bottomStackPx = tickerHeightPx + breakingHeightPx;
+  const topHeadlineOffsetPx =
+    overlays.headlineEnabled && overlays.headlineText.trim().length > 0 ? 44 : 10;
 
-    const mountPlayer = () => {
-      if (cancelled || !ytContainerRef.current || !window.YT?.Player) return;
-      if (ytPlayerRef.current) {
-        try {
-          ytPlayerRef.current.destroy();
-        } catch {
-          // ignore
-        }
-      }
-      ytContainerRef.current.innerHTML = '';
-      const hostEl = document.createElement('div');
-      hostEl.className = 'w-full h-full';
-      ytContainerRef.current.appendChild(hostEl);
-
-      ytPlayerRef.current = new window.YT.Player(hostEl, {
-        videoId,
-        playerVars: {
-          autoplay: 0,
-          enablejsapi: 1,
-          rel: 0,
-          modestbranding: 1,
-          playsinline: 1,
-          ...(typeof window !== 'undefined' && window.location?.origin
-            ? {
-                origin: window.location.origin,
-                widget_referrer: window.location.href,
-              }
-            : {}),
-        },
-        events: {
-          onError: (e) => {
-            if (!cancelled) {
-              setYtError(
-                e.data === 101 || e.data === 150 || e.data === 153
-                  ? `YouTube embedded playback is restricted for this video or frame (Error ${e.data}). You can still open it on YouTube, or upload an MP4/MOV/WebM clip to broadcast via RTMP.`
-                  : `YouTube IFrame Player reported playback error code ${e.data}.`,
-              );
-            }
-          },
-        },
-      });
-    };
-
-    if (window.YT?.Player) {
-      mountPlayer();
-    } else {
-      const existingScript = document.querySelector('script[src="https://www.youtube.com/iframe_api"]');
-      if (!existingScript) {
-        const script = document.createElement('script');
-        script.src = 'https://www.youtube.com/iframe_api';
-        script.async = true;
-        document.head.appendChild(script);
-      }
-      const prevCallback = window.onYouTubeIframeAPIReady;
-      window.onYouTubeIframeAPIReady = () => {
-        if (prevCallback) prevCallback();
-        mountPlayer();
-      };
-    }
-
-    return () => {
-      cancelled = true;
-      if (ytPlayerRef.current) {
-        try {
-          ytPlayerRef.current.destroy();
-        } catch {
-          // ignore
-        }
-        ytPlayerRef.current = null;
-      }
-    };
-  }, [sourceType, youtubeResult?.valid, youtubeResult?.videoId]);
-
-  const tickerHeightPx = 32;
   const logoPosClass =
     overlays.logoPosition === 'top-left'
-      ? 'top-3 left-3'
+      ? 'left-3'
       : overlays.logoPosition === 'top-right'
-        ? 'top-3 right-3'
+        ? 'right-3'
         : overlays.logoPosition === 'bottom-left'
           ? 'left-3'
           : 'right-3';
+  const isTopLogo =
+    overlays.logoPosition === 'top-left' || overlays.logoPosition === 'top-right';
+  const bottomOffsetPx = bottomStackPx > 0 ? bottomStackPx + 8 : 10;
 
-  const isBottomLogo =
-    overlays.logoPosition === 'bottom-left' || overlays.logoPosition === 'bottom-right';
-  const bottomOffsetPx = overlays.tickerEnabled ? tickerHeightPx + 10 : 12;
+  const isTopClock =
+    overlays.clockPosition === 'top-left' || overlays.clockPosition === 'top-right';
+  const clockPosClass =
+    overlays.clockPosition === 'top-left' || overlays.clockPosition === 'bottom-left'
+      ? 'left-3'
+      : 'right-3';
 
   const tickerDurationSec = Math.max(6, Math.round(1400 / Math.max(40, overlays.tickerSpeed)));
 
@@ -215,51 +229,60 @@ export function VideoPreviewStage({
     <div className="relative w-full max-w-full aspect-video bg-[#07090D] rounded-xl overflow-hidden border border-[#232B3A]">
       {sourceType === 'uploaded' && selectedVideo ? (
         <video
+          ref={videoRef}
           key={resolvedVideoSrc}
           src={resolvedVideoSrc}
           controls
           loop={loopVideo}
           playsInline
+          onLoadedMetadata={() => emitVideoMeta('Ready')}
+          onPlay={() => emitVideoMeta('Playing')}
+          onPause={() => emitVideoMeta('Paused')}
+          onWaiting={() => emitVideoMeta('Buffering')}
+          onEnded={() => emitVideoMeta('Ended')}
+          onVolumeChange={() => emitVideoMeta(videoRef.current?.paused ? 'Paused' : 'Playing')}
           onError={() =>
             setMediaError(
-              'Browser could not preview this video format directly, though the backend FFmpeg engine can still transcode it for RTMP.',
+              'Browser could not preview this video format directly, though backend FFmpeg can still encode it for RTMP.',
             )
           }
           className="w-full h-full object-contain bg-black"
         />
-      ) : sourceType === 'direct-url' && directUrl.trim() ? (
+      ) : sourceType === 'direct-url' && trimmedDirectUrl && isPullProtocolUrl ? (
+        <div className="w-full h-full flex flex-col items-center justify-center p-4 sm:p-6 text-center bg-[#090D14]">
+          <div className="w-11 h-11 rounded-xl bg-blue-600/15 border border-blue-500/35 flex items-center justify-center mb-2.5">
+            <Radio className="w-5 h-5 text-blue-400" />
+          </div>
+          <p className="text-xs sm:text-sm font-semibold text-slate-100">
+            Authorized RTMP / SRT Live Feed Configured
+          </p>
+          <p className="text-[11px] font-mono text-blue-300 mt-1 break-all max-w-md px-2">
+            {trimmedDirectUrl}
+          </p>
+          <p className="text-[11px] text-slate-400 mt-1.5 max-w-md">
+            HTML5 browsers do not decode native RTMP/SRT streams directly. Live overlays below preview exactly how FFmpeg ingests and relays this feed to Facebook Live.
+          </p>
+        </div>
+      ) : sourceType === 'direct-url' && trimmedDirectUrl ? (
         <video
-          key={directUrl.trim()}
-          src={directUrl.trim()}
+          ref={videoRef}
+          key={trimmedDirectUrl}
+          src={trimmedDirectUrl}
           controls
           playsInline
+          onLoadedMetadata={() => emitVideoMeta('Ready')}
+          onPlay={() => emitVideoMeta('Playing')}
+          onPause={() => emitVideoMeta('Paused')}
+          onWaiting={() => emitVideoMeta('Buffering')}
+          onEnded={() => emitVideoMeta('Ended')}
+          onVolumeChange={() => emitVideoMeta(videoRef.current?.paused ? 'Paused' : 'Playing')}
           onError={() =>
             setMediaError(
-              'Browser preview unavailable for this direct stream URL (CORS or HLS container). Use Verify Encoding Pipeline to test backend FFmpeg ingestion.',
+              'Browser preview unavailable for this URL (CORS or HLS format). Backend FFmpeg can still ingest verified streams.',
             )
           }
           className="w-full h-full object-contain bg-black"
         />
-      ) : sourceType === 'youtube-preview' && youtubeResult?.valid ? (
-        <div className="w-full h-full relative bg-black">
-          <div ref={ytContainerRef} className="w-full h-full" />
-          {ytError && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0B0E14]/95 p-4 sm:p-6 text-center gap-3 z-20">
-              <AlertTriangle className="w-8 h-8 text-amber-400" />
-              <p className="text-xs sm:text-sm font-medium text-slate-200 max-w-md">{ytError}</p>
-              {youtubeResult.watchUrl && (
-                <a
-                  href={youtubeResult.watchUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="min-h-[40px] px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold inline-flex items-center gap-1.5"
-                >
-                  <span>Watch on YouTube</span>
-                </a>
-              )}
-            </div>
-          )}
-        </div>
       ) : (sourceType === 'camera' || sourceType === 'screen') && captureStream ? (
         <video
           ref={captureVideoRef}
@@ -284,20 +307,20 @@ export function VideoPreviewStage({
               ? 'Camera Preview Inactive'
               : sourceType === 'screen'
                 ? 'Screen Capture Inactive'
-                : 'No Video Source Loaded'}
+                : 'No Facebook Broadcast Source Loaded'}
           </p>
           <p className="text-[11px] sm:text-xs text-slate-400 mt-1 max-w-md">
             {sourceType === 'camera'
-              ? 'Tap Start Camera below to request Android camera and microphone permissions.'
+              ? 'Start camera + microphone below to record and upload a clip.'
               : sourceType === 'screen'
-                ? 'Start Android screen capture if supported by your Chrome build, or upload an MP4/MOV/WebM clip.'
-                : 'Select an authorized MP4/MOV/WebM file, enter an authorized direct media URL, or load a YouTube share URL for IFrame preview.'}
+                ? 'Start Android screen capture where supported or upload a recording.'
+                : 'Select or upload an MP4/MOV/WebM clip, or enter an authorized HTTPS/HLS/RTMP/SRT stream URL.'}
           </p>
         </div>
       )}
 
       {mediaError && (
-        <div className="pointer-events-none absolute inset-x-3 top-12 flex justify-center">
+        <div className="pointer-events-none absolute inset-x-3 top-12 flex justify-center z-20">
           <div className="bg-[#0B0E14]/90 border border-amber-500/40 rounded-md px-3 py-1.5 text-[11px] sm:text-xs text-amber-200 flex items-center gap-2 max-w-lg">
             <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
             <span>{mediaError}</span>
@@ -305,6 +328,7 @@ export function VideoPreviewStage({
         </div>
       )}
 
+      {/* Program Output On-Air State Indicator */}
       <div className="pointer-events-none absolute top-2.5 left-2.5 flex items-center gap-2 z-20">
         {streamStatus === 'Live' ? (
           <div className="flex items-center gap-1.5 bg-red-600 text-white px-2 py-0.5 sm:px-2.5 sm:py-1 rounded text-[10px] sm:text-[11px] font-semibold tracking-wider font-mono">
@@ -319,11 +343,12 @@ export function VideoPreviewStage({
         ) : (sourceType === 'camera' || sourceType === 'screen') && captureStream ? (
           <div className="flex items-center gap-1.5 bg-[#0B0E14]/90 border border-blue-500/40 text-blue-200 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded text-[10px] sm:text-[11px] font-medium">
             <Camera className="w-3 h-3 text-blue-400 shrink-0" />
-            <span>{sourceType === 'camera' ? 'Camera Preview (Record to Upload)' : 'Screen Preview (Record to Upload)'}</span>
+            <span>{sourceType === 'camera' ? 'Camera (Record to Upload)' : 'Screen (Record to Upload)'}</span>
           </div>
         ) : null}
       </div>
 
+      {/* Live Composited Graphics Overlays */}
       {showOverlays && (
         <div className="pointer-events-none absolute inset-0 overflow-hidden z-10">
           {overlays.logoEnabled && resolvedLogoSrc && (
@@ -334,7 +359,8 @@ export function VideoPreviewStage({
               style={{
                 width: `${overlays.logoScale}%`,
                 opacity: overlays.logoOpacity,
-                bottom: isBottomLogo ? `${bottomOffsetPx}px` : undefined,
+                top: isTopLogo ? `${topHeadlineOffsetPx}px` : undefined,
+                bottom: !isTopLogo ? `${bottomOffsetPx}px` : undefined,
               }}
               className={`absolute object-contain select-none ${logoPosClass}`}
             />
@@ -346,11 +372,26 @@ export function VideoPreviewStage({
               style={{
                 backgroundColor: hexToRgba(overlays.headlineBgColor, overlays.headlineBgOpacity),
                 color: overlays.headlineColor,
-                fontSize: `clamp(11px, 2.8vw, ${Math.max(12, Math.round(overlays.headlineFontSize * 0.58))}px)`,
+                fontSize: `clamp(11px, 2.6vw, ${Math.max(12, Math.round(overlays.headlineFontSize * 0.56))}px)`,
               }}
-              className={`absolute top-3 inset-x-3 px-3 py-1.5 rounded font-semibold tracking-tight truncate ${headlineAnimClass}`}
+              className={`absolute top-2.5 inset-x-3 px-3 py-1 rounded font-semibold tracking-tight truncate ${headlineAnimClass}`}
             >
               {overlays.headlineText}
+            </div>
+          )}
+
+          {overlays.clockEnabled && (
+            <div
+              style={{
+                backgroundColor: hexToRgba(overlays.clockBgColor, overlays.clockBgOpacity),
+                color: overlays.clockColor,
+                fontSize: `clamp(10px, 2vw, ${Math.max(11, Math.round(overlays.clockFontSize * 0.65))}px)`,
+                top: isTopClock ? `${topHeadlineOffsetPx}px` : undefined,
+                bottom: !isTopClock ? `${bottomOffsetPx}px` : undefined,
+              }}
+              className={`absolute ${clockPosClass} px-2.5 py-1 rounded font-mono font-semibold tabular-nums tracking-tight whitespace-nowrap`}
+            >
+              {formatClockDisplay(now, overlays.clockFormat)}
             </div>
           )}
 
@@ -359,7 +400,7 @@ export function VideoPreviewStage({
               <div
                 key={`lt-${overlays.lowerThirdTitle}-${overlays.lowerThirdAnimation}`}
                 style={{
-                  bottom: `${overlays.tickerEnabled ? tickerHeightPx + 10 : 12}px`,
+                  bottom: `${bottomStackPx > 0 ? bottomStackPx + 8 : 10}px`,
                   backgroundColor: hexToRgba(overlays.lowerThirdBgColor, 0.9),
                   color: overlays.lowerThirdTextColor,
                 }}
@@ -384,7 +425,34 @@ export function VideoPreviewStage({
               </div>
             )}
 
-          {overlays.tickerEnabled && overlays.tickerText.trim().length > 0 && (
+          {hasBreakingBanner && (
+            <div
+              style={{
+                bottom: `${tickerHeightPx > 0 ? tickerHeightPx + 3 : 8}px`,
+                height: `${breakingHeightPx}px`,
+                backgroundColor: `rgba(11, 14, 20, ${overlays.breakingNewsOpacity})`,
+                color: overlays.breakingNewsTextColor,
+              }}
+              className="absolute inset-x-3 flex items-stretch rounded overflow-hidden border border-white/10"
+            >
+              <div
+                style={{
+                  backgroundColor: hexToRgba(
+                    overlays.breakingNewsBgColor,
+                    overlays.breakingNewsOpacity,
+                  ),
+                }}
+                className="px-2.5 flex items-center text-[10px] sm:text-xs font-extrabold uppercase tracking-wider shrink-0"
+              >
+                {overlays.breakingNewsLabel.trim() || 'BREAKING NEWS'}
+              </div>
+              <div className="px-2.5 flex items-center text-[11px] sm:text-xs font-semibold truncate min-w-0">
+                {overlays.breakingNewsText}
+              </div>
+            </div>
+          )}
+
+          {tickerHeightPx > 0 && (
             <div
               style={{
                 height: `${tickerHeightPx}px`,
@@ -396,7 +464,7 @@ export function VideoPreviewStage({
             >
               <div
                 style={{
-                  fontSize: `clamp(11px, 2.5vw, ${Math.max(11, Math.round(overlays.tickerFontSize * 0.68))}px)`,
+                  fontSize: `clamp(11px, 2.4vw, ${Math.max(11, Math.round(overlays.tickerFontSize * 0.65))}px)`,
                 }}
                 className="animate-ticker font-medium px-4"
               >

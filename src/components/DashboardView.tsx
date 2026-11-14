@@ -39,6 +39,8 @@ export function DashboardView({
   const activeOverlaysCount = [
     overlays.logoEnabled && overlays.logoUrl,
     overlays.headlineEnabled,
+    overlays.breakingNewsEnabled,
+    overlays.clockEnabled,
     overlays.lowerThirdEnabled,
     overlays.tickerEnabled,
   ].filter(Boolean).length;
@@ -156,10 +158,10 @@ export function DashboardView({
         <div className="bg-[#121721] border border-[#232B3A] rounded-lg p-5 min-w-0">
           <div className="text-xs font-medium text-slate-400">Active Graphics Overlays</div>
           <div className="mt-2 text-lg font-semibold text-slate-100 font-mono tabular-nums">
-            {activeOverlaysCount} / 4 Enabled
+            {activeOverlaysCount} / 6 Enabled
           </div>
           <div className="mt-1 text-xs text-slate-500">
-            Logo · Headline · Lower-Third · Ticker
+            Logo · Headline · Breaking · Clock · Lower-3rd · Ticker
           </div>
         </div>
 

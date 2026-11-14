@@ -579,12 +579,13 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
       res.json({
         valid: true,
         url: check.normalized,
+        protocol: check.protocol || 'https',
         probe,
       });
     } catch (err) {
       res.status(400).json({
         valid: false,
-        error: `Unable to probe direct media URL: ${err instanceof Error ? err.message : String(err)}`,
+        error: `Unable to probe media feed: ${err instanceof Error ? err.message : String(err)}`,
       });
     }
   });
@@ -596,8 +597,91 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
 
   app.post('/api/overlays', requireControlAccess, (req, res) => {
     const incoming = (req.body ?? {}) as Partial<OverlayConfig>;
-    const { logoPath: _ignoredPath, logoUrl: _ignoredUrl, ...safeFields } = incoming;
-    const updated = saveOverlayConfig(safeFields);
+    const sanitized: Partial<OverlayConfig> = {};
+
+    const cleanHex = (val: unknown): string | undefined =>
+      typeof val === 'string' && /^#[0-9a-fA-F]{6}$/.test(val.trim()) ? val.trim() : undefined;
+    const clampNum = (val: unknown, min: number, max: number): number | undefined => {
+      const n = Number(val);
+      return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : undefined;
+    };
+    const isPos = (val: unknown): val is OverlayConfig['logoPosition'] =>
+      val === 'top-left' || val === 'top-right' || val === 'bottom-left' || val === 'bottom-right';
+    const isAnim = (val: unknown): val is OverlayConfig['headlineAnimation'] =>
+      val === 'static' || val === 'fade' || val === 'slide';
+
+    if (typeof incoming.logoEnabled === 'boolean') sanitized.logoEnabled = incoming.logoEnabled;
+    if (isPos(incoming.logoPosition)) sanitized.logoPosition = incoming.logoPosition;
+    const logoScale = clampNum(incoming.logoScale, 5, 35);
+    if (logoScale !== undefined) sanitized.logoScale = logoScale;
+    const logoOpacity = clampNum(incoming.logoOpacity, 0.1, 1);
+    if (logoOpacity !== undefined) sanitized.logoOpacity = logoOpacity;
+
+    if (typeof incoming.headlineEnabled === 'boolean') sanitized.headlineEnabled = incoming.headlineEnabled;
+    if (typeof incoming.headlineText === 'string') sanitized.headlineText = incoming.headlineText.slice(0, 180);
+    const hlSize = clampNum(incoming.headlineFontSize, 16, 64);
+    if (hlSize !== undefined) sanitized.headlineFontSize = hlSize;
+    const hlColor = cleanHex(incoming.headlineColor);
+    if (hlColor) sanitized.headlineColor = hlColor;
+    const hlBg = cleanHex(incoming.headlineBgColor);
+    if (hlBg) sanitized.headlineBgColor = hlBg;
+    const hlAlpha = clampNum(incoming.headlineBgOpacity, 0, 1);
+    if (hlAlpha !== undefined) sanitized.headlineBgOpacity = hlAlpha;
+    if (isAnim(incoming.headlineAnimation)) sanitized.headlineAnimation = incoming.headlineAnimation;
+
+    if (typeof incoming.breakingNewsEnabled === 'boolean') sanitized.breakingNewsEnabled = incoming.breakingNewsEnabled;
+    if (typeof incoming.breakingNewsLabel === 'string') sanitized.breakingNewsLabel = incoming.breakingNewsLabel.slice(0, 40);
+    if (typeof incoming.breakingNewsText === 'string') sanitized.breakingNewsText = incoming.breakingNewsText.slice(0, 220);
+    const bnBg = cleanHex(incoming.breakingNewsBgColor);
+    if (bnBg) sanitized.breakingNewsBgColor = bnBg;
+    const bnTxt = cleanHex(incoming.breakingNewsTextColor);
+    if (bnTxt) sanitized.breakingNewsTextColor = bnTxt;
+    const bnAlpha = clampNum(incoming.breakingNewsOpacity, 0.2, 1);
+    if (bnAlpha !== undefined) sanitized.breakingNewsOpacity = bnAlpha;
+
+    if (typeof incoming.lowerThirdEnabled === 'boolean') sanitized.lowerThirdEnabled = incoming.lowerThirdEnabled;
+    if (typeof incoming.lowerThirdTitle === 'string') sanitized.lowerThirdTitle = incoming.lowerThirdTitle.slice(0, 120);
+    if (typeof incoming.lowerThirdSubtitle === 'string') sanitized.lowerThirdSubtitle = incoming.lowerThirdSubtitle.slice(0, 160);
+    const ltAccent = cleanHex(incoming.lowerThirdAccentColor);
+    if (ltAccent) sanitized.lowerThirdAccentColor = ltAccent;
+    const ltBg = cleanHex(incoming.lowerThirdBgColor);
+    if (ltBg) sanitized.lowerThirdBgColor = ltBg;
+    const ltTxt = cleanHex(incoming.lowerThirdTextColor);
+    if (ltTxt) sanitized.lowerThirdTextColor = ltTxt;
+    if (isAnim(incoming.lowerThirdAnimation)) sanitized.lowerThirdAnimation = incoming.lowerThirdAnimation;
+
+    if (typeof incoming.clockEnabled === 'boolean') sanitized.clockEnabled = incoming.clockEnabled;
+    if (isPos(incoming.clockPosition)) sanitized.clockPosition = incoming.clockPosition;
+    if (
+      incoming.clockFormat === 'date-time' ||
+      incoming.clockFormat === 'time-24h' ||
+      incoming.clockFormat === 'time-12h'
+    ) {
+      sanitized.clockFormat = incoming.clockFormat;
+    }
+    const clkSize = clampNum(incoming.clockFontSize, 12, 36);
+    if (clkSize !== undefined) sanitized.clockFontSize = clkSize;
+    const clkTxt = cleanHex(incoming.clockColor);
+    if (clkTxt) sanitized.clockColor = clkTxt;
+    const clkBg = cleanHex(incoming.clockBgColor);
+    if (clkBg) sanitized.clockBgColor = clkBg;
+    const clkAlpha = clampNum(incoming.clockBgOpacity, 0, 1);
+    if (clkAlpha !== undefined) sanitized.clockBgOpacity = clkAlpha;
+
+    if (typeof incoming.tickerEnabled === 'boolean') sanitized.tickerEnabled = incoming.tickerEnabled;
+    if (typeof incoming.tickerText === 'string') sanitized.tickerText = incoming.tickerText.slice(0, 500);
+    const tkSize = clampNum(incoming.tickerFontSize, 14, 36);
+    if (tkSize !== undefined) sanitized.tickerFontSize = tkSize;
+    const tkTxt = cleanHex(incoming.tickerColor);
+    if (tkTxt) sanitized.tickerColor = tkTxt;
+    const tkBg = cleanHex(incoming.tickerBgColor);
+    if (tkBg) sanitized.tickerBgColor = tkBg;
+    const tkAlpha = clampNum(incoming.tickerBgOpacity, 0.1, 1);
+    if (tkAlpha !== undefined) sanitized.tickerBgOpacity = tkAlpha;
+    const tkSpeed = clampNum(incoming.tickerSpeed, 40, 240);
+    if (tkSpeed !== undefined) sanitized.tickerSpeed = tkSpeed;
+
+    const updated = saveOverlayConfig(sanitized);
     res.json(updated);
   });
 
