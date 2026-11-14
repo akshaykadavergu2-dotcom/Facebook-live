@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Livecast Android Capture</string>
+    <string name="notification_channel_name">Live Capture Service</string>
+    <string name="notification_title">Livecast Monitor A Capture Active</string>
+    <string name="notification_text">Streaming dedicated Monitor A surface to Livecast Studio backend.</string>
+    <string name="action_stop_capture">Stop Capture</string>
+</resources>

@@ -1,0 +1,3 @@
+-keep class com.livecast.capture.** { *; }
+-dontwarn okhttp3.**
+-dontwarn okio.**

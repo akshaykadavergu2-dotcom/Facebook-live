@@ -1,6 +1,7 @@
 import {
   LayoutDashboard,
   Radio,
+  Smartphone,
   Youtube,
   Layers,
   Cast,
@@ -15,6 +16,7 @@ import { PWAInstallButton } from './PWAInstallButton';
 export type NavSection =
   | 'dashboard'
   | 'studio'
+  | 'android-capture'
   | 'youtube'
   | 'overlays'
   | 'facebook'
@@ -29,6 +31,7 @@ export const NAV_ITEMS: Array<{
 }> = [
   { id: 'dashboard', label: 'Dashboard', shortLabel: 'Home', icon: LayoutDashboard },
   { id: 'studio', label: 'Live Studio', shortLabel: 'Studio', icon: Radio },
+  { id: 'android-capture', label: 'Android Capture', shortLabel: 'Capture', icon: Smartphone },
   { id: 'youtube', label: 'YouTube Preview', shortLabel: 'YouTube', icon: Youtube },
   { id: 'overlays', label: 'Overlays', shortLabel: 'Overlays', icon: Layers },
   { id: 'facebook', label: 'Facebook Output', shortLabel: 'Output', icon: Cast },
@@ -149,7 +152,7 @@ const PRIMARY_MOBILE_TABS: Array<{
 }> = [
   { id: 'dashboard', label: 'Home', icon: LayoutDashboard },
   { id: 'studio', label: 'Studio', icon: Radio },
-  { id: 'youtube', label: 'YouTube', icon: Youtube },
+  { id: 'android-capture', label: 'Capture', icon: Smartphone },
   { id: 'facebook', label: 'Output', icon: Cast },
 ];
 
@@ -160,7 +163,10 @@ export function MobileBottomNav({
   streamStatus,
 }: MobileBottomNavProps) {
   const isMoreSection =
-    activeSection === 'overlays' || activeSection === 'history' || activeSection === 'settings';
+    activeSection === 'youtube' ||
+    activeSection === 'overlays' ||
+    activeSection === 'history' ||
+    activeSection === 'settings';
 
   return (
     <nav

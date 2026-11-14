@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ImagePlus, Save, Trash2 } from 'lucide-react';
 import type {
+  AndroidCaptureTelemetry,
   ClockFormat,
   LogoPosition,
   OverlayConfig,
@@ -16,6 +17,7 @@ interface OverlaysViewProps {
   sourceType: ProgramMonitorSource;
   selectedVideo: VideoAsset | null;
   directUrl: string;
+  captureTelemetry?: AndroidCaptureTelemetry | null;
   streamStatus: StreamStatusState;
 }
 
@@ -25,6 +27,7 @@ export function OverlaysView({
   sourceType,
   selectedVideo,
   directUrl,
+  captureTelemetry = null,
   streamStatus,
 }: OverlaysViewProps) {
   const logoInputRef = useRef<HTMLInputElement | null>(null);
@@ -142,6 +145,7 @@ export function OverlaysView({
             sourceType={programSource}
             selectedVideo={selectedVideo}
             directUrl={directUrl}
+            captureTelemetry={captureTelemetry}
             overlays={draft}
             streamStatus={streamStatus}
             showOverlays={showOverlayPreview}

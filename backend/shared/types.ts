@@ -8,7 +8,46 @@ export type ClockFormat = 'date-time' | 'time-24h' | 'time-12h';
 
 export type OverlayAnimation = 'static' | 'fade' | 'slide' | 'scroll';
 
-export type VideoSourceType = 'uploaded' | 'direct-url' | 'youtube-preview';
+export type VideoSourceType = 'uploaded' | 'direct-url' | 'android-capture' | 'youtube-preview';
+
+export type AndroidCaptureConnectionState =
+  | 'Disconnected'
+  | 'WaitingForApp'
+  | 'Connecting'
+  | 'Capturing'
+  | 'Reconnecting'
+  | 'Stopped'
+  | 'Error';
+
+export type AndroidVideoCaptureStatus = 'IDLE' | 'CAPTURING' | 'PAUSED' | 'ERROR';
+
+export type AndroidAudioCaptureStatus = 'IDLE' | 'AUDIO_CAPTURED' | 'AUDIO_NOT_AVAILABLE';
+
+export interface AndroidCaptureTelemetry {
+  sessionId: string | null;
+  status: AndroidCaptureConnectionState;
+  videoStatus: AndroidVideoCaptureStatus;
+  audioStatus: AndroidAudioCaptureStatus;
+  permissionGranted: boolean;
+  fps: number;
+  width: number;
+  height: number;
+  audioSampleRate: number;
+  bitrateKbps: number;
+  latencyMs: number;
+  framesReceived: number;
+  youtubeUrl: string | null;
+  lastHeartbeatAt: string | null;
+  lastError: string | null;
+}
+
+export interface AndroidCaptureSessionInfo {
+  sessionId: string;
+  ingestToken: string;
+  wsIngestUrl: string;
+  deepLinkUrl: string;
+  expiresAt: string;
+}
 
 export interface OverlayConfig {
   logoEnabled: boolean;

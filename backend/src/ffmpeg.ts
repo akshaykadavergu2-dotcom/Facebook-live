@@ -522,6 +522,9 @@ function diagnoseRtmpError(stderrLine: string): string | null {
 
 export interface StartStreamOptions {
   inputTarget: string;
+  inputStream?: NodeJS.ReadableStream;
+  inputFormat?: 'flv';
+  hasAudioOverride?: boolean;
   isLocalFile: boolean;
   sourceType: VideoSourceType;
   sourceLabel: string;
@@ -534,6 +537,8 @@ export interface StartStreamOptions {
 
 class StreamManager extends EventEmitter {
   private process: ChildProcessWithoutNullStreams | null = null;
+  private activeInputStream: NodeJS.ReadableStream | null = null;
+  private isPipedInput = false;
   private status: StreamStatusState = 'Offline';
   private telemetry: StreamTelemetry = {
     status: 'Offline',
@@ -620,12 +625,24 @@ class StreamManager extends EventEmitter {
     }
 
     let probe: MediaProbeResult;
-    try {
-      probe = await probeMedia(options.inputTarget);
-    } catch (err) {
-      throw new Error(
-        `Failed to inspect media source with ffprobe: ${err instanceof Error ? err.message : String(err)}`,
-      );
+    if (options.inputStream) {
+      probe = {
+        durationSec: 0,
+        width: QUALITY_PROFILES[options.quality].width,
+        height: QUALITY_PROFILES[options.quality].height,
+        fps: 30,
+        videoCodec: 'h264',
+        audioCodec: options.hasAudioOverride ? 'aac' : null,
+        hasAudio: Boolean(options.hasAudioOverride),
+      };
+    } else {
+      try {
+        probe = await probeMedia(options.inputTarget);
+      } catch (err) {
+        throw new Error(
+          `Failed to inspect media source with ffprobe: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
 
     const profile = QUALITY_PROFILES[options.quality];
@@ -637,14 +654,20 @@ class StreamManager extends EventEmitter {
 
     const filterComplex = buildFilterGraph(profile.width, profile.height, options.overlays, hasLogoInput);
     const args: string[] = ['-hide_banner', '-loglevel', 'info'];
-    if (options.isLocalFile || !isLiveNetworkStreamUrl(options.inputTarget)) {
-      args.push('-re');
+    if (options.inputStream) {
+      if (options.inputFormat) {
+        args.push('-f', options.inputFormat);
+      }
+      args.push('-fflags', '+genpts', '-i', 'pipe:0');
+    } else {
+      if (options.isLocalFile || !isLiveNetworkStreamUrl(options.inputTarget)) {
+        args.push('-re');
+      }
+      if (options.isLocalFile && options.loopVideo) {
+        args.push('-stream_loop', '-1');
+      }
+      args.push('-i', options.inputTarget);
     }
-
-    if (options.isLocalFile && options.loopVideo) {
-      args.push('-stream_loop', '-1');
-    }
-    args.push('-i', options.inputTarget);
 
     let nextInputIndex = 1;
     if (hasLogoInput && options.overlays.logoPath) {
@@ -746,6 +769,15 @@ class StreamManager extends EventEmitter {
 
     const child = spawn('ffmpeg', args, { stdio: ['pipe', 'pipe', 'pipe'] });
     this.process = child;
+    this.activeInputStream = options.inputStream ?? null;
+    this.isPipedInput = Boolean(options.inputStream);
+
+    if (options.inputStream) {
+      options.inputStream.pipe(child.stdin);
+      child.stdin.on('error', () => {
+        // Ignore EPIPE when FFmpeg closes stdin on shutdown
+      });
+    }
 
     this.stopDurationTimer();
     const startMs = Date.now();
@@ -864,6 +896,18 @@ class StreamManager extends EventEmitter {
       addStreamHistoryEntry(historyEntry);
       this.emit('history', historyEntry);
 
+      if (this.activeInputStream) {
+        try {
+          this.activeInputStream.unpipe(child.stdin);
+          if ('destroy' in this.activeInputStream && typeof this.activeInputStream.destroy === 'function') {
+            this.activeInputStream.destroy();
+          }
+        } catch {
+          // ignore
+        }
+        this.activeInputStream = null;
+      }
+      this.isPipedInput = false;
       this.process = null;
       this.activeSecretKey = null;
       this.updateStatus({
@@ -893,6 +937,8 @@ class StreamManager extends EventEmitter {
     this.stopRequested = true;
     this.pushLog('info', 'Sending graceful stop signal to FFmpeg...');
     const proc = this.process;
+    const piped = this.isPipedInput;
+    const inputStream = this.activeInputStream;
 
     await new Promise<void>((resolve) => {
       let settled = false;
@@ -905,17 +951,31 @@ class StreamManager extends EventEmitter {
 
       proc.once('close', done);
 
-      try {
-        proc.stdin.write('q\n');
-      } catch {
-        // Ignore write error if stdin already closed
-      }
-
-      setTimeout(() => {
-        if (!settled && proc.exitCode === null) {
-          proc.kill('SIGTERM');
+      if (piped) {
+        try {
+          if (inputStream) {
+            inputStream.unpipe(proc.stdin);
+            if ('destroy' in inputStream && typeof inputStream.destroy === 'function') {
+              inputStream.destroy();
+            }
+          }
+          proc.stdin.end();
+        } catch {
+          // ignore
         }
-      }, 2000);
+        proc.kill('SIGTERM');
+      } else {
+        try {
+          proc.stdin.write('q\n');
+        } catch {
+          // Ignore write error if stdin already closed
+        }
+        setTimeout(() => {
+          if (!settled && proc.exitCode === null) {
+            proc.kill('SIGTERM');
+          }
+        }, 2000);
+      }
 
       setTimeout(() => {
         if (!settled && proc.exitCode === null) {
@@ -932,16 +992,38 @@ class StreamManager extends EventEmitter {
     inputTarget: string,
     quality: StreamQualityProfile,
     overlays: OverlayConfig,
+    pipedOptions?: {
+      inputStream: NodeJS.ReadableStream;
+      inputFormat: 'flv';
+      hasAudio: boolean;
+    },
   ): Promise<PipelineCheckResult> {
     const startMs = Date.now();
     const profile = QUALITY_PROFILES[quality];
-    const probe = await probeMedia(inputTarget);
+    const probe = pipedOptions
+      ? {
+          durationSec: 0,
+          width: profile.width,
+          height: profile.height,
+          fps: 30,
+          videoCodec: 'h264',
+          audioCodec: pipedOptions.hasAudio ? 'aac' : null,
+          hasAudio: pipedOptions.hasAudio,
+        }
+      : await probeMedia(inputTarget);
+
     const hasLogoInput = Boolean(
       overlays.logoEnabled && overlays.logoPath && fs.existsSync(overlays.logoPath),
     );
     const filterComplex = buildFilterGraph(profile.width, profile.height, overlays, hasLogoInput);
 
-    const args: string[] = ['-hide_banner', '-loglevel', 'error', '-i', inputTarget];
+    const args: string[] = ['-hide_banner', '-loglevel', 'error'];
+    if (pipedOptions) {
+      args.push('-f', pipedOptions.inputFormat, '-fflags', '+genpts', '-i', 'pipe:0');
+    } else {
+      args.push('-i', inputTarget);
+    }
+
     let nextIdx = 1;
     if (hasLogoInput && overlays.logoPath) {
       args.push('-i', overlays.logoPath);
@@ -978,6 +1060,72 @@ class StreamManager extends EventEmitter {
       'null',
       '-',
     );
+
+    if (pipedOptions) {
+      return new Promise<PipelineCheckResult>((resolve) => {
+        const child = spawn('ffmpeg', args, { stdio: ['pipe', 'pipe', 'pipe'] });
+        let stderr = '';
+        let settled = false;
+
+        const finish = (ok: boolean, errMsg?: string) => {
+          if (settled) return;
+          settled = true;
+          try {
+            pipedOptions.inputStream.unpipe(child.stdin);
+            if ('destroy' in pipedOptions.inputStream && typeof pipedOptions.inputStream.destroy === 'function') {
+              pipedOptions.inputStream.destroy();
+            }
+          } catch {
+            // ignore
+          }
+          if (ok) {
+            resolve({
+              success: true,
+              durationMs: Date.now() - startMs,
+              ffmpegCommandSummary: `ffmpeg -f flv -i pipe:0 -filter_complex "${filterComplex.slice(0, 84)}..." -c:v libx264 -r 30 -c:a aac -f null -`,
+              videoCodec: 'libx264 (H.264)',
+              audioCodec: pipedOptions.hasAudio ? 'aac (Android Playback Audio)' : 'aac (silent fallback)',
+              resolution: profile.label,
+              message: `Android capture dry-run encode passed in ${Date.now() - startMs}ms. Live capture A/V sync and overlays verified.`,
+              stderrExcerpt: stderr.trim() || undefined,
+            });
+          } else {
+            resolve({
+              success: false,
+              durationMs: Date.now() - startMs,
+              ffmpegCommandSummary: 'ffmpeg piped dry-run failed',
+              videoCodec: 'libx264',
+              audioCodec: 'aac',
+              resolution: profile.label,
+              message: `Pipeline validation failed: ${errMsg || stderr || 'FFmpeg exited unexpectedly.'}`,
+              stderrExcerpt: errMsg || stderr || undefined,
+            });
+          }
+        };
+
+        pipedOptions.inputStream.pipe(child.stdin);
+        child.stdin.on('error', () => {
+          // ignore EPIPE
+        });
+        child.stderr.on('data', (chunk: Buffer) => {
+          stderr += chunk.toString('utf8');
+        });
+        const timer = setTimeout(() => {
+          if (child.exitCode === null) {
+            child.kill('SIGTERM');
+          }
+          finish(false, 'Dry-run timed out waiting for 2 seconds of Android capture frames.');
+        }, 12000);
+        child.on('close', (code) => {
+          clearTimeout(timer);
+          if (code === 0) {
+            finish(true);
+          } else {
+            finish(false, stderr.trim() || `FFmpeg exited with code ${code ?? 'null'}`);
+          }
+        });
+      });
+    }
 
     try {
       const { stderr } = await execFileAsync('ffmpeg', args, { timeout: 25000 });

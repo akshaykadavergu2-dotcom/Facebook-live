@@ -11,6 +11,7 @@ import {
   Play,
   Radio,
   RefreshCw,
+  Smartphone,
   Square,
   Trash2,
   Upload,
@@ -18,6 +19,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import type {
+  AndroidCaptureTelemetry,
   OverlayConfig,
   PipelineCheckResult,
   RtmpPublicConfig,
@@ -39,6 +41,7 @@ import { YouTubeMonitorCard } from './YouTubeMonitorCard';
 
 interface LiveStudioViewProps {
   telemetry: StreamTelemetry;
+  captureTelemetry?: AndroidCaptureTelemetry | null;
   logs: StreamLogEntry[];
   videos: VideoAsset[];
   overlays: OverlayConfig;
@@ -75,6 +78,7 @@ interface DirectProbeSummary {
 
 export function LiveStudioView({
   telemetry,
+  captureTelemetry = null,
   logs,
   videos,
   overlays,
@@ -178,7 +182,13 @@ export function LiveStudioView({
 
   const selectedVideo = videos.find((v) => v.id === selectedVideoId) ?? videos[0] ?? null;
   const isStreamingOrConnecting = telemetry.status === 'Live' || telemetry.status === 'Connecting';
+  const isAndroidCaptureReady = Boolean(
+    captureTelemetry &&
+      captureTelemetry.width > 0 &&
+      (captureTelemetry.status === 'Capturing' || captureTelemetry.status === 'Reconnecting'),
+  );
   const isRtmpEligibleSource =
+    (effectiveFbSource === 'android-capture' && isAndroidCaptureReady) ||
     (effectiveFbSource === 'uploaded' && Boolean(selectedVideo)) ||
     (effectiveFbSource === 'direct-url' && directUrl.trim().length > 0);
 
@@ -428,12 +438,17 @@ export function LiveStudioView({
 
     if (!isRtmpEligibleSource) {
       setActionError(
-        'Select an Uploaded MP4/MOV/WebM file or an authorized Direct Media / RTMP / SRT URL to enable START LIVE.',
+        'Select an active Android Live Capture session, an Uploaded MP4/MOV/WebM file, or an authorized Direct Media / RTMP / SRT URL to enable START LIVE.',
       );
       return;
     }
 
-    const apiSource: VideoSourceType = effectiveFbSource === 'direct-url' ? 'direct-url' : 'uploaded';
+    const apiSource: VideoSourceType =
+      effectiveFbSource === 'android-capture'
+        ? 'android-capture'
+        : effectiveFbSource === 'direct-url'
+          ? 'direct-url'
+          : 'uploaded';
     setStreamBusyAction('starting');
     try {
       const res = await api.startStream({
@@ -468,10 +483,15 @@ export function LiveStudioView({
     setActionError(null);
     setPipelineResult(null);
     if (!isRtmpEligibleSource) {
-      setActionError('Select an uploaded video or authorized direct/RTMP/SRT URL to test FFmpeg.');
+      setActionError('Select an uploaded video, active Android Live Capture, or authorized direct/RTMP/SRT URL to test FFmpeg.');
       return;
     }
-    const apiSource: VideoSourceType = effectiveFbSource === 'direct-url' ? 'direct-url' : 'uploaded';
+    const apiSource: VideoSourceType =
+      effectiveFbSource === 'android-capture'
+        ? 'android-capture'
+        : effectiveFbSource === 'direct-url'
+          ? 'direct-url'
+          : 'uploaded';
     setPipelineChecking(true);
     try {
       const res = await api.validatePipeline({
@@ -493,56 +513,72 @@ export function LiveStudioView({
     effectiveFbSource === 'direct-url' && directProbe?.url === directUrl.trim() ? directProbe : null;
 
   const fbSourceName =
-    effectiveFbSource === 'uploaded'
-      ? selectedVideo?.originalName || 'No File Selected'
-      : effectiveFbSource === 'direct-url'
-        ? directUrl.trim() || 'No URL Assigned'
-        : effectiveFbSource === 'camera'
-          ? captureStream
-            ? 'Android Camera + Mic (Local Preview)'
-            : 'Camera Inactive'
-          : captureStream
-            ? 'Android Screen Capture (Local Preview)'
-            : 'Screen Capture Inactive';
+    effectiveFbSource === 'android-capture'
+      ? isAndroidCaptureReady && captureTelemetry
+        ? `Android Live Capture (${captureTelemetry.width}x${captureTelemetry.height})`
+        : 'Android Capture Inactive'
+      : effectiveFbSource === 'uploaded'
+        ? selectedVideo?.originalName || 'No File Selected'
+        : effectiveFbSource === 'direct-url'
+          ? directUrl.trim() || 'No URL Assigned'
+          : effectiveFbSource === 'camera'
+            ? captureStream
+              ? 'Android Camera + Mic (Local Preview)'
+              : 'Camera Inactive'
+            : captureStream
+              ? 'Android Screen Capture (Local Preview)'
+              : 'Screen Capture Inactive';
 
   const fbSourceResolution = isStreamingOrConnecting
     ? telemetry.outputResolution
-    : effectiveFbSource === 'uploaded' && selectedVideo
-      ? `${selectedVideo.width}x${selectedVideo.height}`
-      : activeDirectProbe
-        ? `${activeDirectProbe.width}x${activeDirectProbe.height}`
-        : fbMediaMeta.width > 0
-          ? `${fbMediaMeta.width}x${fbMediaMeta.height}`
-          : quality === '1080p'
-            ? '1920x1080 target'
-            : '1280x720 target';
+    : effectiveFbSource === 'android-capture' && captureTelemetry && captureTelemetry.width > 0
+      ? `${captureTelemetry.width}x${captureTelemetry.height}`
+      : effectiveFbSource === 'uploaded' && selectedVideo
+        ? `${selectedVideo.width}x${selectedVideo.height}`
+        : activeDirectProbe
+          ? `${activeDirectProbe.width}x${activeDirectProbe.height}`
+          : fbMediaMeta.width > 0
+            ? `${fbMediaMeta.width}x${fbMediaMeta.height}`
+            : quality === '1080p'
+              ? '1920x1080 target'
+              : '1280x720 target';
 
   const fbSourceDuration = isStreamingOrConnecting
     ? formatDuration(telemetry.durationSec)
-    : effectiveFbSource === 'uploaded' && selectedVideo
-      ? formatDuration(selectedVideo.durationSec)
-      : activeDirectProbe
-        ? activeDirectProbe.durationSec > 0
-          ? formatDuration(activeDirectProbe.durationSec)
-          : 'Live Pull'
-        : fbMediaMeta.durationSec > 0
-          ? formatDuration(fbMediaMeta.durationSec)
-          : '00:00:00';
+    : effectiveFbSource === 'android-capture'
+      ? isAndroidCaptureReady
+        ? 'Live Capture'
+        : '00:00:00'
+      : effectiveFbSource === 'uploaded' && selectedVideo
+        ? formatDuration(selectedVideo.durationSec)
+        : activeDirectProbe
+          ? activeDirectProbe.durationSec > 0
+            ? formatDuration(activeDirectProbe.durationSec)
+            : 'Live Pull'
+          : fbMediaMeta.durationSec > 0
+            ? formatDuration(fbMediaMeta.durationSec)
+            : '00:00:00';
 
   const fbAudioStatus =
-    effectiveFbSource === 'uploaded' && selectedVideo
-      ? selectedVideo.hasAudio
-        ? `${(selectedVideo.audioCodec || 'Audio').toUpperCase()} Track`
-        : 'Silent AAC Fallback'
-      : activeDirectProbe
-        ? activeDirectProbe.hasAudio
-          ? `${(activeDirectProbe.audioCodec || 'Audio').toUpperCase()} Track`
+    effectiveFbSource === 'android-capture'
+      ? captureTelemetry?.audioStatus === 'AUDIO_CAPTURED'
+        ? `AAC · ${captureTelemetry.audioSampleRate || 44100} Hz`
+        : captureTelemetry?.audioStatus === 'AUDIO_NOT_AVAILABLE'
+          ? 'Silent AAC Fallback'
+          : 'Idle'
+      : effectiveFbSource === 'uploaded' && selectedVideo
+        ? selectedVideo.hasAudio
+          ? `${(selectedVideo.audioCodec || 'Audio').toUpperCase()} Track`
           : 'Silent AAC Fallback'
-        : effectiveFbSource === 'camera' || effectiveFbSource === 'screen'
-          ? captureStream
-            ? 'Mic / Capture Audio'
-            : 'Idle'
-          : 'Idle';
+        : activeDirectProbe
+          ? activeDirectProbe.hasAudio
+            ? `${(activeDirectProbe.audioCodec || 'Audio').toUpperCase()} Track`
+            : 'Silent AAC Fallback'
+          : effectiveFbSource === 'camera' || effectiveFbSource === 'screen'
+            ? captureStream
+              ? 'Mic / Capture Audio'
+              : 'Idle'
+            : 'Idle';
 
   return (
     <div className="space-y-5 min-w-0">
@@ -584,6 +620,7 @@ export function LiveStudioView({
             selectedVideo={selectedVideo}
             directUrl={directUrl}
             captureStream={captureStream}
+            captureTelemetry={captureTelemetry}
             overlays={overlays}
             streamStatus={telemetry.status}
             showOverlays={showOverlayPreview}
@@ -667,7 +704,7 @@ export function LiveStudioView({
                 </button>
               </div>
 
-              <div className="grid grid-cols-3 gap-1.5 p-1 bg-[#0B0E14] border border-[#232B3A] rounded-xl">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1 bg-[#0B0E14] border border-[#232B3A] rounded-xl">
                 <button
                   type="button"
                   onClick={() => onChangeSourceType('uploaded')}
@@ -682,6 +719,18 @@ export function LiveStudioView({
                 </button>
                 <button
                   type="button"
+                  onClick={() => onChangeSourceType('android-capture')}
+                  className={`min-h-[44px] px-2 py-2 text-xs font-medium rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap ${
+                    effectiveFbSource === 'android-capture'
+                      ? 'bg-blue-600 text-white'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Smartphone className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">Android Live</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => onChangeSourceType('direct-url')}
                   className={`min-h-[44px] px-2 py-2 text-xs font-medium rounded-lg transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap ${
                     effectiveFbSource === 'direct-url'
@@ -690,7 +739,7 @@ export function LiveStudioView({
                   }`}
                 >
                   <Globe className="w-3.5 h-3.5 shrink-0" />
-                  <span className="truncate">URL / RTMP / SRT</span>
+                  <span className="truncate">URL / RTMP</span>
                 </button>
                 <button
                   type="button"
@@ -708,6 +757,58 @@ export function LiveStudioView({
                 </button>
               </div>
             </div>
+
+            {effectiveFbSource === 'android-capture' && (
+              <div className="bg-[#0E131B] border border-[#232B3A] rounded-xl p-3.5 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-xs font-semibold text-slate-100">
+                    Android Native Companion Capture Input
+                  </div>
+                  <span
+                    className={`text-xs font-mono font-semibold ${
+                      isAndroidCaptureReady ? 'text-emerald-400' : 'text-amber-300'
+                    }`}
+                  >
+                    {captureTelemetry?.status || 'Disconnected'}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Feeds live H.264 video and permitted playback audio from Monitor A via the dedicated Android Capture companion app directly into Monitor B and FFmpeg RTMPS.
+                </p>
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div className="bg-[#080B10] border border-[#232B3A] rounded-lg px-2.5 py-2">
+                    <div className="text-[10px] text-slate-400">Video</div>
+                    <div className="font-mono font-semibold text-slate-200 mt-0.5 truncate">
+                      {captureTelemetry?.videoStatus || 'IDLE'}
+                    </div>
+                  </div>
+                  <div className="bg-[#080B10] border border-[#232B3A] rounded-lg px-2.5 py-2">
+                    <div className="text-[10px] text-slate-400">Audio</div>
+                    <div className="font-mono font-semibold text-slate-200 mt-0.5 truncate">
+                      {captureTelemetry?.audioStatus === 'AUDIO_CAPTURED'
+                        ? 'CAPTURED'
+                        : captureTelemetry?.audioStatus === 'AUDIO_NOT_AVAILABLE'
+                          ? 'SILENT AAC'
+                          : 'IDLE'}
+                    </div>
+                  </div>
+                  <div className="bg-[#080B10] border border-[#232B3A] rounded-lg px-2.5 py-2">
+                    <div className="text-[10px] text-slate-400">FPS</div>
+                    <div className="font-mono font-semibold tabular-nums text-slate-200 mt-0.5">
+                      {captureTelemetry?.fps || 0} fps
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onNavigate('android-capture')}
+                  className="w-full min-h-[44px] px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center justify-center gap-2"
+                >
+                  <Smartphone className="w-4 h-4 shrink-0" />
+                  <span>Open Android Live Capture Panel</span>
+                </button>
+              </div>
+            )}
 
             {effectiveFbSource === 'uploaded' && (
               <div className="space-y-3">

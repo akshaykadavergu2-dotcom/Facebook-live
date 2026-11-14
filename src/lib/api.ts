@@ -1,4 +1,6 @@
 import type {
+  AndroidCaptureSessionInfo,
+  AndroidCaptureTelemetry,
   OverlayConfig,
   PipelineCheckResult,
   RtmpPublicConfig,
@@ -267,6 +269,39 @@ export const api = {
 
   getHistory: () => requestJson<{ history: StreamHistoryEntry[] }>('/api/history'),
   clearHistory: () => requestJson<{ history: StreamHistoryEntry[] }>('/api/history', { method: 'DELETE' }),
+
+  getCaptureStatus: (sessionId?: string | null) =>
+    requestJson<{ telemetry: AndroidCaptureTelemetry }>(
+      sessionId ? `/api/capture/status?sessionId=${encodeURIComponent(sessionId)}` : '/api/capture/status',
+    ),
+  createCaptureSession: (youtubeUrl?: string | null) =>
+    requestJson<{ session: AndroidCaptureSessionInfo; telemetry: AndroidCaptureTelemetry }>(
+      '/api/capture/session',
+      {
+        method: 'POST',
+        body: JSON.stringify({ youtubeUrl: youtubeUrl || undefined }),
+      },
+    ),
+  startCaptureSession: (sessionId: string, youtubeUrl?: string | null) =>
+    requestJson<{ signaled: boolean; telemetry: AndroidCaptureTelemetry }>(
+      `/api/capture/session/${encodeURIComponent(sessionId)}/start`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ youtubeUrl: youtubeUrl || undefined }),
+      },
+    ),
+  stopCaptureSession: (sessionId?: string | null) =>
+    requestJson<{ telemetry: AndroidCaptureTelemetry }>(
+      `/api/capture/session/${encodeURIComponent(sessionId || 'active')}/stop`,
+      { method: 'POST' },
+    ),
+  getCapturePreviewUrl: (sessionId?: string | null, cacheBust?: number) => {
+    const params = new URLSearchParams();
+    if (sessionId) params.set('sessionId', sessionId);
+    if (cacheBust) params.set('t', String(cacheBust));
+    const qs = params.toString();
+    return apiUrl(qs ? `/api/capture/preview.mp4?${qs}` : '/api/capture/preview.mp4');
+  },
 };
 
 export function formatDuration(totalSec: number): string {

@@ -17,6 +17,7 @@ import {
   requireControlAccess,
 } from './auth.ts';
 import { isEnvEncryptionKeySet } from './crypto.ts';
+import { captureManager } from './capture.ts';
 import {
   checkFfmpegAvailability,
   generateSampleVideo,
@@ -271,6 +272,67 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
     });
   });
 
+  // Android Live Capture session & preview routes
+  app.get('/api/capture/status', requireAllowedOrigin, (req, res) => {
+    const sessionId = typeof req.query.sessionId === 'string' ? req.query.sessionId : undefined;
+    res.json({ telemetry: captureManager.getTelemetry(sessionId) });
+  });
+
+  app.post('/api/capture/session', requireControlAccess, streamControlLimiter, (req, res) => {
+    const youtubeUrl = typeof req.body?.youtubeUrl === 'string' ? req.body.youtubeUrl.trim() : null;
+    const forwardedProto = Array.isArray(req.headers['x-forwarded-proto'])
+      ? req.headers['x-forwarded-proto'][0]
+      : req.headers['x-forwarded-proto'];
+    const proto = (forwardedProto || req.protocol || 'https').split(',')[0].trim();
+    const forwardedHost = Array.isArray(req.headers['x-forwarded-host'])
+      ? req.headers['x-forwarded-host'][0]
+      : req.headers['x-forwarded-host'];
+    const host = (forwardedHost || req.headers.host || 'facebook-live-gvx5.onrender.com').split(',')[0].trim();
+
+    const session = captureManager.createSession(youtubeUrl, proto, host);
+    res.status(201).json({
+      session,
+      telemetry: captureManager.getTelemetry(session.sessionId),
+    });
+  });
+
+  app.post('/api/capture/session/:id/start', requireControlAccess, (req, res) => {
+    const sessionId = String(req.params.id);
+    const youtubeUrl = typeof req.body?.youtubeUrl === 'string' ? req.body.youtubeUrl.trim() : null;
+    const signaled = captureManager.requestStart(sessionId, youtubeUrl);
+    res.json({
+      signaled,
+      telemetry: captureManager.getTelemetry(sessionId),
+    });
+  });
+
+  app.post('/api/capture/session/:id/stop', requireControlAccess, (req, res) => {
+    const sessionId = String(req.params.id);
+    const telemetry = captureManager.stopSession(sessionId);
+    res.json({ telemetry });
+  });
+
+  app.get('/api/capture/preview.mp4', requireAllowedOrigin, (req, res) => {
+    const sessionId = typeof req.query.sessionId === 'string' ? req.query.sessionId : undefined;
+    const remux = captureManager.createPreviewRemuxStream(sessionId);
+    if (!remux) {
+      res.status(404).json({ error: 'No active Android video capture stream ready for preview.' });
+      return;
+    }
+
+    res.setHeader('Content-Type', 'video/mp4');
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+
+    remux.stream.pipe(res);
+    req.on('close', () => {
+      remux.cleanup();
+    });
+    res.on('close', () => {
+      remux.cleanup();
+    });
+  });
+
   app.post('/api/stream/start', requireControlAccess, streamControlLimiter, async (req, res) => {
     if (streamManager.isBusy()) {
       res.status(409).json({
@@ -314,11 +376,35 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
     }
 
     let inputTarget = '';
+    let inputStream: NodeJS.ReadableStream | undefined;
+    let inputFormat: 'flv' | undefined;
+    let hasAudioOverride: boolean | undefined;
     let isLocalFile = false;
     let sourceType: VideoSourceType = 'uploaded';
     let sourceLabel = '';
 
-    if (body.sourceType === 'direct-url') {
+    if (body.sourceType === 'android-capture') {
+      const capState = captureManager.getTelemetry();
+      if (!captureManager.hasActiveVideoStream(capState.sessionId)) {
+        res.status(400).json({
+          error:
+            'Android Live Capture is not actively streaming video yet. Connect the Android Capture companion app and tap Start Capture first.',
+        });
+        return;
+      }
+      const flvStream = captureManager.createFfmpegFlvStream(capState.sessionId);
+      if (!flvStream) {
+        res.status(400).json({ error: 'Unable to attach to Android live capture FLV ingest stream.' });
+        return;
+      }
+      inputTarget = 'pipe:0';
+      inputStream = flvStream;
+      inputFormat = 'flv';
+      hasAudioOverride = captureManager.hasAudioTrack(capState.sessionId);
+      isLocalFile = false;
+      sourceType = 'android-capture';
+      sourceLabel = `Android Live Capture (${capState.width || 1280}x${capState.height || 720})`;
+    } else if (body.sourceType === 'direct-url') {
       const check = validateDirectMediaUrl(body.directUrl || '');
       if (!check.valid || !check.normalized) {
         res.status(400).json({ error: check.error || 'Invalid direct media URL.' });
@@ -352,6 +438,9 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
     try {
       const telemetry = await streamManager.startStream({
         inputTarget,
+        inputStream,
+        inputFormat,
+        hasAudioOverride,
         isLocalFile,
         sourceType,
         sourceLabel,
@@ -363,6 +452,9 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
       });
       res.json({ telemetry });
     } catch (err) {
+      if (inputStream && 'destroy' in inputStream && typeof inputStream.destroy === 'function') {
+        inputStream.destroy();
+      }
       const message = err instanceof Error ? err.message : 'Failed to start FFmpeg stream.';
       if (message === 'STREAM_ALREADY_ACTIVE') {
         res.status(409).json({ error: 'A broadcast session is already active.' });
@@ -392,6 +484,48 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
       return;
     }
 
+    const quality: StreamQualityProfile = body.quality === '1080p' ? '1080p' : '720p';
+
+    if (body.sourceType === 'android-capture') {
+      const capState = captureManager.getTelemetry();
+      if (!captureManager.hasActiveVideoStream(capState.sessionId)) {
+        res.status(400).json({
+          success: false,
+          message:
+            'Android Live Capture is not actively streaming video yet. Connect the Android companion app and start capture first.',
+        });
+        return;
+      }
+      const flvStream = captureManager.createFfmpegFlvStream(capState.sessionId);
+      if (!flvStream) {
+        res.status(400).json({
+          success: false,
+          message: 'Unable to attach to Android live capture FLV stream.',
+        });
+        return;
+      }
+      try {
+        const result = await streamManager.testPipelineDryRun(
+          'pipe:0',
+          quality,
+          getOverlayConfig(),
+          {
+            inputStream: flvStream,
+            inputFormat: 'flv',
+            hasAudio: captureManager.hasAudioTrack(capState.sessionId),
+          },
+        );
+        res.json(result);
+      } catch (err) {
+        flvStream.destroy();
+        res.status(400).json({
+          success: false,
+          message: err instanceof Error ? err.message : 'Android capture dry-run encode failed.',
+        });
+      }
+      return;
+    }
+
     let inputTarget = '';
     if (body.sourceType === 'direct-url') {
       const check = validateDirectMediaUrl(body.directUrl || '');
@@ -414,7 +548,6 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
       inputTarget = safePath;
     }
 
-    const quality: StreamQualityProfile = body.quality === '1080p' ? '1080p' : '720p';
     try {
       const result = await streamManager.testPipelineDryRun(inputTarget, quality, getOverlayConfig());
       res.json(result);
@@ -781,6 +914,7 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
 
 export function attachWebSocketServer(server: http.Server): WebSocketServer {
   const wss = new WebSocketServer({ noServer: true });
+  const captureWss = new WebSocketServer({ noServer: true, maxPayload: 12 * 1024 * 1024 });
   const aliveClients = new WeakSet<WebSocket>();
 
   // Heartbeat keeps WebSocket alive across Render/Nginx/Cloudflare proxy idle timeouts
@@ -803,6 +937,27 @@ export function attachWebSocketServer(server: http.Server): WebSocketServer {
 
   server.on('upgrade', (request, socket, head) => {
     const reqUrl = new URL(request.url || '/', `http://${request.headers.host || 'localhost'}`);
+
+    // Authenticated Android native capture ingest endpoint
+    if (reqUrl.pathname === '/ws/capture-ingest') {
+      const sessionId = reqUrl.searchParams.get('sessionId') || '';
+      const queryToken = reqUrl.searchParams.get('token') || '';
+      const authHeader = request.headers.authorization || '';
+      const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+      const token = bearerToken || queryToken;
+
+      if (!sessionId || !token || !captureManager.verifyIngestToken(sessionId, token)) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+
+      captureWss.handleUpgrade(request, socket, head, (ws) => {
+        captureManager.attachIngestSocket(sessionId, ws);
+      });
+      return;
+    }
+
     if (reqUrl.pathname !== '/ws') {
       if (server.listenerCount('upgrade') <= 1) {
         socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
@@ -849,6 +1004,7 @@ export function attachWebSocketServer(server: http.Server): WebSocketServer {
         telemetry: streamManager.getTelemetry(),
         logs: streamManager.getLogs(),
         history: getStreamHistory(),
+        capture: captureManager.getTelemetry(),
       }),
     );
   });
@@ -861,6 +1017,9 @@ export function attachWebSocketServer(server: http.Server): WebSocketServer {
   });
   streamManager.on('history', (entry) => {
     broadcastWs({ type: 'history', entry });
+  });
+  captureManager.on('telemetry', (capture) => {
+    broadcastWs({ type: 'capture', capture });
   });
 
   return wss;

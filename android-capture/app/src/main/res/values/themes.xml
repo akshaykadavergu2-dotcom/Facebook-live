@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.LivecastCapture" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="android:windowBackground">@color/studio_bg</item>
+        <item name="colorPrimary">@color/studio_blue</item>
+        <item name="android:statusBarColor">@color/studio_surface</item>
+        <item name="android:navigationBarColor">@color/studio_bg</item>
+    </style>
+
+    <style name="Theme.LivecastMonitorStage" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="android:windowBackground">#000000</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:statusBarColor">#000000</item>
+        <item name="android:navigationBarColor">#000000</item>
+    </style>
+</resources>

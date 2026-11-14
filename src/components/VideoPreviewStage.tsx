@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { Film, AlertTriangle, Tv, Camera, MonitorSmartphone, Radio } from 'lucide-react';
+import { Film, AlertTriangle, Tv, Camera, MonitorSmartphone, Radio, Smartphone } from 'lucide-react';
 import type {
+  AndroidCaptureTelemetry,
   OverlayConfig,
   StreamStatusState,
   VideoAsset,
   VideoSourceType,
   YouTubeValidationResult,
 } from '../../shared/types';
-import { resolveMediaUrl } from '../lib/api';
+import { api, resolveMediaUrl } from '../lib/api';
 
 export type ProgramMonitorSource = VideoSourceType | 'camera' | 'screen';
 
@@ -25,6 +26,7 @@ interface VideoPreviewStageProps {
   directUrl: string;
   youtubeResult?: YouTubeValidationResult | null;
   captureStream?: MediaStream | null;
+  captureTelemetry?: AndroidCaptureTelemetry | null;
   overlays: OverlayConfig;
   streamStatus: StreamStatusState;
   showOverlays?: boolean;
@@ -77,6 +79,7 @@ export function VideoPreviewStage({
   selectedVideo,
   directUrl,
   captureStream = null,
+  captureTelemetry = null,
   overlays,
   streamStatus,
   showOverlays = true,
@@ -87,9 +90,24 @@ export function VideoPreviewStage({
   const captureVideoRef = useRef<HTMLVideoElement | null>(null);
   const [mediaError, setMediaError] = useState<string | null>(null);
   const [now, setNow] = useState<Date>(() => new Date());
+  const [previewKeySeed, setPreviewKeySeed] = useState<number>(1);
 
   const trimmedDirectUrl = directUrl.trim();
   const isPullProtocolUrl = /^(rtmps?|srt):\/\//i.test(trimmedDirectUrl);
+  const isAndroidCapturing =
+    sourceType === 'android-capture' &&
+    captureTelemetry?.status === 'Capturing' &&
+    captureTelemetry.framesReceived > 0;
+  const androidPreviewUrl = isAndroidCapturing
+    ? api.getCapturePreviewUrl(captureTelemetry?.sessionId, previewKeySeed)
+    : '';
+
+  useEffect(() => {
+    if (isAndroidCapturing) {
+      setPreviewKeySeed((v) => v + 1);
+      setMediaError(null);
+    }
+  }, [isAndroidCapturing, captureTelemetry?.sessionId]);
 
   useEffect(() => {
     if (!overlays.clockEnabled || !showOverlays) return;
@@ -100,11 +118,19 @@ export function VideoPreviewStage({
 
   useEffect(() => {
     setMediaError(null);
-  }, [sourceType, selectedVideo?.id, trimmedDirectUrl]);
+  }, [sourceType, selectedVideo?.id, trimmedDirectUrl, captureTelemetry?.status]);
 
   useEffect(() => {
     if (!onPlaybackMetaChange) return;
-    if (sourceType === 'uploaded' && selectedVideo) {
+    if (sourceType === 'android-capture') {
+      onPlaybackMetaChange({
+        playbackStatus: isAndroidCapturing ? 'Playing' : 'Idle',
+        width: captureTelemetry?.width || 0,
+        height: captureTelemetry?.height || 0,
+        durationSec: 0,
+        muted: false,
+      });
+    } else if (sourceType === 'uploaded' && selectedVideo) {
       onPlaybackMetaChange({
         playbackStatus: 'Ready',
         width: selectedVideo.width,
@@ -139,6 +165,9 @@ export function VideoPreviewStage({
     }
   }, [
     sourceType,
+    isAndroidCapturing,
+    captureTelemetry?.width,
+    captureTelemetry?.height,
     selectedVideo?.id,
     selectedVideo?.width,
     selectedVideo?.height,
@@ -227,7 +256,50 @@ export function VideoPreviewStage({
 
   return (
     <div className="relative w-full max-w-full aspect-video bg-[#07090D] rounded-xl overflow-hidden border border-[#232B3A]">
-      {sourceType === 'uploaded' && selectedVideo ? (
+      {sourceType === 'android-capture' && isAndroidCapturing ? (
+        <video
+          ref={videoRef}
+          key={androidPreviewUrl}
+          src={androidPreviewUrl}
+          autoPlay
+          muted
+          controls
+          playsInline
+          onLoadedMetadata={() => emitVideoMeta('Playing')}
+          onPlay={() => emitVideoMeta('Playing')}
+          onPause={() => emitVideoMeta('Paused')}
+          onWaiting={() => emitVideoMeta('Buffering')}
+          onError={() =>
+            setMediaError(
+              'Live fragmented MP4 preview interrupted. Incoming H.264/AAC ingest remains active for FFmpeg RTMP output.',
+            )
+          }
+          className="w-full h-full object-contain bg-black"
+        />
+      ) : sourceType === 'android-capture' ? (
+        <div className="w-full h-full flex flex-col items-center justify-center p-4 sm:p-6 text-center bg-[#090C11]">
+          <div className="w-11 h-11 rounded-xl bg-[#141A24] border border-[#232B3A] flex items-center justify-center mb-2.5">
+            <Smartphone className="w-5 h-5 text-blue-400" />
+          </div>
+          <p className="text-xs sm:text-sm font-medium text-slate-200">
+            {captureTelemetry?.status === 'WaitingForApp'
+              ? 'Waiting for Android Companion App'
+              : captureTelemetry?.status === 'Connecting'
+                ? 'Android Connected · Waiting for Capture Permission'
+                : captureTelemetry?.status === 'Reconnecting'
+                  ? 'Android Capture Reconnecting...'
+                  : captureTelemetry?.status === 'Stopped'
+                    ? 'Android Capture Stopped'
+                    : captureTelemetry?.status === 'Error'
+                      ? 'Android Capture Error'
+                      : 'Android Live Capture Inactive'}
+          </p>
+          <p className="text-[11px] sm:text-xs text-slate-400 mt-1 max-w-md">
+            {captureTelemetry?.lastError ||
+              'Tap CONNECT ANDROID, open the Android Capture companion app, grant MediaProjection consent on Monitor A, and frames will appear here live.'}
+          </p>
+        </div>
+      ) : sourceType === 'uploaded' && selectedVideo ? (
         <video
           ref={videoRef}
           key={resolvedVideoSrc}
@@ -314,7 +386,7 @@ export function VideoPreviewStage({
               ? 'Start camera + microphone below to record and upload a clip.'
               : sourceType === 'screen'
                 ? 'Start Android screen capture where supported or upload a recording.'
-                : 'Select or upload an MP4/MOV/WebM clip, or enter an authorized HTTPS/HLS/RTMP/SRT stream URL.'}
+                : 'Select or upload an MP4/MOV/WebM clip, select Android Live Capture, or enter an authorized HTTPS/HLS/RTMP/SRT stream URL.'}
           </p>
         </div>
       )}
@@ -340,7 +412,14 @@ export function VideoPreviewStage({
             <Tv className="w-3 h-3" />
             <span>CONNECTING</span>
           </div>
-        ) : (sourceType === 'camera' || sourceType === 'screen') && captureStream ? (
+        ) : null}
+        {isAndroidCapturing && (
+          <div className="flex items-center gap-1.5 bg-emerald-600/95 text-white px-2 py-0.5 sm:px-2.5 sm:py-1 rounded text-[10px] sm:text-[11px] font-semibold tracking-wider font-mono">
+            <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
+            <span>LIVE CAPTURE</span>
+          </div>
+        )}
+        {streamStatus === 'Offline' && (sourceType === 'camera' || sourceType === 'screen') && captureStream ? (
           <div className="flex items-center gap-1.5 bg-[#0B0E14]/90 border border-blue-500/40 text-blue-200 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded text-[10px] sm:text-[11px] font-medium">
             <Camera className="w-3 h-3 text-blue-400 shrink-0" />
             <span>{sourceType === 'camera' ? 'Camera (Record to Upload)' : 'Screen (Record to Upload)'}</span>

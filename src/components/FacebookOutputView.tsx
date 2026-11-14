@@ -13,6 +13,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import type {
+  AndroidCaptureTelemetry,
   PipelineCheckResult,
   RtmpPublicConfig,
   StreamLogEntry,
@@ -31,6 +32,7 @@ interface FacebookOutputViewProps {
   sourceType: VideoSourceType | 'camera' | 'screen';
   selectedVideo: VideoAsset | null;
   directUrl: string;
+  captureTelemetry?: AndroidCaptureTelemetry | null;
   quality: StreamQualityProfile;
   onChangeQuality: (q: StreamQualityProfile) => void;
   loopVideo: boolean;
@@ -47,6 +49,7 @@ export function FacebookOutputView({
   sourceType,
   selectedVideo,
   directUrl,
+  captureTelemetry = null,
   quality,
   onChangeQuality,
   loopVideo,
@@ -72,22 +75,32 @@ export function FacebookOutputView({
   }, [rtmpConfig.serverUrl]);
 
   const isStreamingOrConnecting = telemetry.status === 'Live' || telemetry.status === 'Connecting';
+  const isCaptureActive = Boolean(
+    captureTelemetry &&
+      captureTelemetry.width > 0 &&
+      (captureTelemetry.status === 'Capturing' || captureTelemetry.status === 'Reconnecting'),
+  );
   const isAuthorizedSource =
+    (sourceType === 'android-capture' && isCaptureActive) ||
     (sourceType === 'uploaded' && Boolean(selectedVideo)) ||
     (sourceType === 'direct-url' && directUrl.trim().length > 0);
 
   const sourceSummary =
-    sourceType === 'uploaded'
-      ? selectedVideo
-        ? `Uploaded File · ${selectedVideo.originalName}`
-        : 'No uploaded video selected'
-      : sourceType === 'direct-url'
-        ? directUrl.trim()
-          ? `Direct / RTMP / SRT Feed · ${directUrl.trim()}`
-          : 'No direct media, RTMP, or SRT URL entered'
-        : sourceType === 'youtube-preview'
-          ? 'YouTube Preview Only (Cannot start FFmpeg RTMP)'
-          : 'Local Browser Capture Preview Only (Record & upload to broadcast)';
+    sourceType === 'android-capture'
+      ? isCaptureActive && captureTelemetry
+        ? `Android Live Capture · ${captureTelemetry.width}x${captureTelemetry.height} @ ${captureTelemetry.fps} fps (${captureTelemetry.audioStatus === 'AUDIO_CAPTURED' ? 'Playback Audio' : 'Silent AAC Fallback'})`
+        : 'Android Live Capture Inactive (Start Capture in Android Capture tab first)'
+      : sourceType === 'uploaded'
+        ? selectedVideo
+          ? `Uploaded File · ${selectedVideo.originalName}`
+          : 'No uploaded video selected'
+        : sourceType === 'direct-url'
+          ? directUrl.trim()
+            ? `Direct / RTMP / SRT Feed · ${directUrl.trim()}`
+            : 'No direct media, RTMP, or SRT URL entered'
+          : sourceType === 'youtube-preview'
+            ? 'YouTube Preview Only (Cannot start FFmpeg RTMP)'
+            : 'Local Browser Capture Preview Only (Record & upload to broadcast)';
 
   const handleSaveCredentials = async () => {
     setSaving(true);
@@ -145,10 +158,16 @@ export function FacebookOutputView({
 
     setStreamBusyAction('starting');
     try {
+      const apiSource: VideoSourceType =
+        sourceType === 'android-capture'
+          ? 'android-capture'
+          : sourceType === 'direct-url'
+            ? 'direct-url'
+            : 'uploaded';
       const res = await api.startStream({
-        sourceType: sourceType === 'direct-url' ? 'direct-url' : 'uploaded',
-        videoId: sourceType === 'uploaded' ? selectedVideo?.id : undefined,
-        directUrl: sourceType === 'direct-url' ? directUrl : undefined,
+        sourceType: apiSource,
+        videoId: apiSource === 'uploaded' ? selectedVideo?.id : undefined,
+        directUrl: apiSource === 'direct-url' ? directUrl : undefined,
         quality,
         loopVideo,
       });
@@ -177,15 +196,21 @@ export function FacebookOutputView({
     setActionError(null);
     setPipelineResult(null);
     if (!isAuthorizedSource) {
-      setActionError('Select an uploaded video or authorized direct media URL first.');
+      setActionError('Select an uploaded video, active Android Live Capture, or authorized direct media URL first.');
       return;
     }
     setPipelineChecking(true);
     try {
+      const apiSource: VideoSourceType =
+        sourceType === 'android-capture'
+          ? 'android-capture'
+          : sourceType === 'direct-url'
+            ? 'direct-url'
+            : 'uploaded';
       const res = await api.validatePipeline({
-        sourceType: sourceType === 'direct-url' ? 'direct-url' : 'uploaded',
-        videoId: sourceType === 'uploaded' ? selectedVideo?.id : undefined,
-        directUrl: sourceType === 'direct-url' ? directUrl : undefined,
+        sourceType: apiSource,
+        videoId: apiSource === 'uploaded' ? selectedVideo?.id : undefined,
+        directUrl: apiSource === 'direct-url' ? directUrl : undefined,
         quality,
       });
       setPipelineResult(res);

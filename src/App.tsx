@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Menu, Radio, RefreshCw, Wifi, WifiOff } from 'lucide-react';
 import type {
+  AndroidCaptureTelemetry,
   OverlayConfig,
   RtmpPublicConfig,
   SecurityStatusInfo,
@@ -12,6 +13,7 @@ import type {
   YouTubeValidationResult,
 } from '../shared/types';
 import { api, API_BASE_URL, formatDuration, getWebSocketUrl } from './lib/api';
+import { AndroidLiveCaptureView } from './components/AndroidLiveCaptureView';
 import { DashboardView } from './components/DashboardView';
 import { FacebookOutputView } from './components/FacebookOutputView';
 import { HistoryView } from './components/HistoryView';
@@ -83,9 +85,28 @@ const INITIAL_OVERLAYS: OverlayConfig = {
   tickerSpeed: 95,
 };
 
+const INITIAL_CAPTURE_TELEMETRY: AndroidCaptureTelemetry = {
+  sessionId: null,
+  status: 'Disconnected',
+  videoStatus: 'IDLE',
+  audioStatus: 'IDLE',
+  permissionGranted: false,
+  fps: 0,
+  width: 0,
+  height: 0,
+  audioSampleRate: 0,
+  bitrateKbps: 0,
+  latencyMs: 0,
+  framesReceived: 0,
+  youtubeUrl: null,
+  lastHeartbeatAt: null,
+  lastError: null,
+};
+
 const SECTION_TITLES: Record<NavSection, string> = {
   dashboard: 'Dashboard',
   studio: 'Live Studio',
+  'android-capture': 'Android Live Capture',
   youtube: 'YouTube Preview',
   overlays: 'Overlays & Graphics',
   facebook: 'Facebook Output',
@@ -103,6 +124,9 @@ export default function App() {
   const [retryingConnection, setRetryingConnection] = useState(false);
 
   const [telemetry, setTelemetry] = useState<StreamTelemetry>(INITIAL_TELEMETRY);
+  const [captureTelemetry, setCaptureTelemetry] = useState<AndroidCaptureTelemetry>(
+    INITIAL_CAPTURE_TELEMETRY,
+  );
   const [logs, setLogs] = useState<StreamLogEntry[]>([]);
   const [rtmpConfig, setRtmpConfig] = useState<RtmpPublicConfig>({
     serverUrl: 'rtmps://live-api-s.facebook.com:443/rtmp/',
@@ -128,14 +152,16 @@ export default function App() {
   const loadStudioData = useCallback(async () => {
     setBackendError(null);
     try {
-      const [securityRes, statusRes, rtmpRes, videosRes, overlaysRes, historyRes] = await Promise.all([
-        api.getSecurityStatus(),
-        api.getStreamStatus(),
-        api.getRtmpConfig(),
-        api.getVideos(),
-        api.getOverlays(),
-        api.getHistory(),
-      ]);
+      const [securityRes, statusRes, rtmpRes, videosRes, overlaysRes, historyRes, captureRes] =
+        await Promise.all([
+          api.getSecurityStatus(),
+          api.getStreamStatus(),
+          api.getRtmpConfig(),
+          api.getVideos(),
+          api.getOverlays(),
+          api.getHistory(),
+          api.getCaptureStatus(),
+        ]);
 
       setSecurity(securityRes);
 
@@ -150,6 +176,7 @@ export default function App() {
       }
       setOverlays(overlaysRes);
       setHistory(historyRes.history);
+      setCaptureTelemetry(captureRes.telemetry);
     } catch (err) {
       const isNetlifyMissingBase =
         !API_BASE_URL && window.location.hostname.endsWith('.netlify.app');
@@ -200,8 +227,15 @@ export default function App() {
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data as string) as
-            | { type: 'init'; telemetry: StreamTelemetry; logs: StreamLogEntry[]; history: StreamHistoryEntry[] }
+            | {
+                type: 'init';
+                telemetry: StreamTelemetry;
+                logs: StreamLogEntry[];
+                history: StreamHistoryEntry[];
+                capture?: AndroidCaptureTelemetry;
+              }
             | { type: 'status'; telemetry: StreamTelemetry }
+            | { type: 'capture'; capture: AndroidCaptureTelemetry }
             | { type: 'log'; entry: StreamLogEntry }
             | { type: 'history'; entry: StreamHistoryEntry };
 
@@ -209,8 +243,13 @@ export default function App() {
             setTelemetry(msg.telemetry);
             setLogs(msg.logs);
             setHistory(msg.history);
+            if (msg.capture) {
+              setCaptureTelemetry(msg.capture);
+            }
           } else if (msg.type === 'status') {
             setTelemetry(msg.telemetry);
+          } else if (msg.type === 'capture') {
+            setCaptureTelemetry(msg.capture);
           } else if (msg.type === 'log') {
             setLogs((prev) => {
               if (prev.some((l) => l.id === msg.entry.id)) return prev;
@@ -417,6 +456,7 @@ export default function App() {
           {section === 'studio' && (
             <LiveStudioView
               telemetry={telemetry}
+              captureTelemetry={captureTelemetry}
               logs={logs}
               videos={videos}
               overlays={overlays}
@@ -440,6 +480,24 @@ export default function App() {
             />
           )}
 
+          {section === 'android-capture' && (
+            <AndroidLiveCaptureView
+              captureTelemetry={captureTelemetry}
+              onCaptureTelemetryUpdated={setCaptureTelemetry}
+              telemetry={telemetry}
+              logs={logs}
+              overlays={overlays}
+              rtmpConfig={rtmpConfig}
+              youtubeResult={youtubeResult}
+              onYouTubeValidated={setYoutubeResult}
+              quality={quality}
+              onChangeQuality={setQuality}
+              onTelemetryUpdated={setTelemetry}
+              onChangeSourceType={setSourceType}
+              onNavigate={setSection}
+            />
+          )}
+
           {section === 'youtube' && (
             <YouTubePreviewView
               youtubeResult={youtubeResult}
@@ -455,6 +513,7 @@ export default function App() {
               sourceType={sourceType}
               selectedVideo={selectedVideo}
               directUrl={directUrl}
+              captureTelemetry={captureTelemetry}
               streamStatus={telemetry.status}
             />
           )}
@@ -467,6 +526,7 @@ export default function App() {
               sourceType={sourceType}
               selectedVideo={selectedVideo}
               directUrl={directUrl}
+              captureTelemetry={captureTelemetry}
               quality={quality}
               onChangeQuality={setQuality}
               loopVideo={loopVideo}
