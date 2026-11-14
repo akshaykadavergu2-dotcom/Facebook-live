@@ -6,6 +6,8 @@ import path from 'node:path';
 import multer from 'multer';
 import { WebSocket, WebSocketServer } from 'ws';
 import type {
+  DestinationId,
+  DestinationMode,
   OverlayConfig,
   StreamQualityProfile,
   VideoAsset,
@@ -25,23 +27,29 @@ import {
   streamManager,
   validateDirectMediaUrl,
   validateRtmpUrl,
+  type DestinationTarget,
 } from './ffmpeg.ts';
 import {
   addVideo,
   clearStreamHistory,
   clearStreamKey,
+  clearYoutubeStreamKey,
   ensureDirectories,
   getDecryptedStreamKey,
+  getDecryptedYoutubeStreamKey,
+  getDestinationsPublicConfig,
   getOverlayConfig,
   getRtmpPublicConfig,
   getStreamHistory,
   getVideoById,
   getVideos,
+  getYoutubeRtmpPublicConfig,
   OVERLAYS_DIR,
   removeVideo,
   safeResolveVideoPath,
   saveOverlayConfig,
   saveRtmpConfig,
+  saveYoutubeRtmpConfig,
   VIDEOS_DIR,
 } from './storage.ts';
 import { validateYouTubeUrl } from './youtube.ts';
@@ -348,32 +356,69 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
       directUrl?: string;
       quality?: StreamQualityProfile;
       loopVideo?: boolean;
+      destinationMode?: DestinationMode;
     };
 
     if (body.sourceType === 'youtube-preview') {
       res.status(400).json({
         error:
-          'YouTube share URLs are preview-only via the official YouTube IFrame Player API and cannot be captured by FFmpeg. Upload an MP4/MOV/WebM file or provide an authorized direct media URL to broadcast.',
+          'YouTube share URLs are preview-only via the official YouTube IFrame Player API and cannot be captured by FFmpeg. Use Monitor A Preview + Android Capture, or upload an MP4/MOV/WebM file.',
       });
       return;
     }
 
     const quality: StreamQualityProfile = body.quality === '1080p' ? '1080p' : '720p';
     const loopVideo = Boolean(body.loopVideo);
+    const destinationMode: DestinationMode =
+      body.destinationMode === 'youtube' || body.destinationMode === 'both'
+        ? body.destinationMode
+        : 'facebook';
 
-    const rtmpConfig = getRtmpPublicConfig();
-    const streamKey = getDecryptedStreamKey();
+    const fbConfig = getRtmpPublicConfig();
+    const fbKey = getDecryptedStreamKey();
+    const ytConfig = getYoutubeRtmpPublicConfig();
+    const ytKey = getDecryptedYoutubeStreamKey();
 
-    const rtmpValidation = validateRtmpUrl(rtmpConfig.serverUrl);
-    if (!rtmpValidation.valid || !rtmpValidation.normalized) {
-      res.status(400).json({ error: rtmpValidation.error || 'Invalid Facebook RTMP Server URL.' });
-      return;
-    }
-    if (!streamKey) {
-      res.status(400).json({
-        error: 'Facebook RTMP Stream Key is not configured. Save your Stream Key securely on the server first.',
+    const destinations: DestinationTarget[] = [];
+
+    if (destinationMode === 'facebook' || destinationMode === 'both') {
+      const rtmpValidation = validateRtmpUrl(fbConfig.serverUrl, 'Facebook Live');
+      if (!rtmpValidation.valid || !rtmpValidation.normalized) {
+        res.status(400).json({ error: rtmpValidation.error || 'Invalid Facebook RTMP Server URL.' });
+        return;
+      }
+      if (!fbKey) {
+        res.status(400).json({
+          error: 'Facebook RTMP Stream Key is not configured. Save your Facebook Stream Key in Settings first.',
+        });
+        return;
+      }
+      destinations.push({
+        id: 'facebook',
+        label: 'Facebook Live',
+        rtmpServerUrl: rtmpValidation.normalized,
+        streamKey: fbKey,
       });
-      return;
+    }
+
+    if (destinationMode === 'youtube' || destinationMode === 'both') {
+      const ytValidation = validateRtmpUrl(ytConfig.serverUrl, 'YouTube Live');
+      if (!ytValidation.valid || !ytValidation.normalized) {
+        res.status(400).json({ error: ytValidation.error || 'Invalid YouTube RTMP Server URL.' });
+        return;
+      }
+      if (!ytKey) {
+        res.status(400).json({
+          error: 'YouTube Live Stream Key is not configured. Save your YouTube Stream Key in Settings first.',
+        });
+        return;
+      }
+      destinations.push({
+        id: 'youtube',
+        label: 'YouTube Live',
+        rtmpServerUrl: ytValidation.normalized,
+        streamKey: ytKey,
+      });
     }
 
     let inputTarget = '';
@@ -389,13 +434,13 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
       if (!captureManager.hasActiveVideoStream(capState.sessionId)) {
         res.status(400).json({
           error:
-            'Android Live Capture is not actively streaming video yet. Connect the Android Capture companion app and tap Start Capture first.',
+            'Live Capture is not actively streaming video yet. Start In-App Live Capture first.',
         });
         return;
       }
       const flvStream = captureManager.createFfmpegFlvStream(capState.sessionId);
       if (!flvStream) {
-        res.status(400).json({ error: 'Unable to attach to Android live capture FLV ingest stream.' });
+        res.status(400).json({ error: 'Unable to attach to live capture FLV ingest stream.' });
         return;
       }
       inputTarget = 'pipe:0';
@@ -404,7 +449,7 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
       hasAudioOverride = captureManager.hasAudioTrack(capState.sessionId);
       isLocalFile = false;
       sourceType = 'android-capture';
-      sourceLabel = `Android Live Capture (${capState.width || 1280}x${capState.height || 720})`;
+      sourceLabel = `Live Capture (${capState.width || 1280}x${capState.height || 720})`;
     } else if (body.sourceType === 'direct-url') {
       const check = validateDirectMediaUrl(body.directUrl || '');
       if (!check.valid || !check.normalized) {
@@ -417,7 +462,7 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
       sourceLabel = check.normalized;
     } else {
       if (!body.videoId) {
-        res.status(400).json({ error: 'Select an uploaded video source or enter a direct media URL.' });
+        res.status(400).json({ error: 'Select an uploaded video source or start Monitor A Capture.' });
         return;
       }
       const asset = getVideoById(body.videoId);
@@ -446,8 +491,8 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
         sourceType,
         sourceLabel,
         quality,
-        rtmpServerUrl: rtmpValidation.normalized,
-        streamKey,
+        destinationMode,
+        destinations,
         overlays: getOverlayConfig(),
         loopVideo,
       });
@@ -463,6 +508,53 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
       }
       res.status(400).json({ error: message });
     }
+  });
+
+  app.post('/api/stream/destination/:dest/start', requireControlAccess, streamControlLimiter, (req, res) => {
+    const destParam = String(req.params.dest) as DestinationId;
+    if (destParam !== 'facebook' && destParam !== 'youtube') {
+      res.status(400).json({ error: 'Invalid destination. Expected facebook or youtube.' });
+      return;
+    }
+    const cfg = destParam === 'youtube' ? getYoutubeRtmpPublicConfig() : getRtmpPublicConfig();
+    const key = destParam === 'youtube' ? getDecryptedYoutubeStreamKey() : getDecryptedStreamKey();
+    const label = destParam === 'youtube' ? 'YouTube Live' : 'Facebook Live';
+    const check = validateRtmpUrl(cfg.serverUrl, label);
+    if (!check.valid || !check.normalized) {
+      res.status(400).json({ error: check.error || `Invalid ${label} Server URL.` });
+      return;
+    }
+    if (!key) {
+      res.status(400).json({ error: `${label} Stream Key is not configured.` });
+      return;
+    }
+    if (!streamManager.isBusy()) {
+      res.status(409).json({
+        error: `Master broadcast is offline. Start Live from Program Output or Android Capture first.`,
+      });
+      return;
+    }
+    const attached = streamManager.startAdditionalDestination({
+      id: destParam,
+      label,
+      rtmpServerUrl: check.normalized,
+      streamKey: key,
+    });
+    if (!attached) {
+      res.status(400).json({ error: `Unable to attach ${label} output to running compositor.` });
+      return;
+    }
+    res.json({ telemetry: streamManager.getTelemetry() });
+  });
+
+  app.post('/api/stream/destination/:dest/stop', requireControlAccess, streamControlLimiter, async (req, res) => {
+    const destParam = String(req.params.dest) as DestinationId;
+    if (destParam !== 'facebook' && destParam !== 'youtube') {
+      res.status(400).json({ error: 'Invalid destination. Expected facebook or youtube.' });
+      return;
+    }
+    const telemetry = await streamManager.stopDestination(destParam);
+    res.json({ telemetry });
   });
 
   app.post('/api/stream/stop', requireControlAccess, streamControlLimiter, async (_req, res) => {
@@ -493,7 +585,7 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
         res.status(400).json({
           success: false,
           message:
-            'Android Live Capture is not actively streaming video yet. Connect the Android companion app and start capture first.',
+            'Live Capture is not actively streaming video yet. Start In-App Live Capture first.',
         });
         return;
       }
@@ -560,8 +652,8 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
     }
   });
 
-  // Encrypted Facebook RTMP credentials endpoints
-  // Supports both /api/stream/credentials and /api/rtmp/config aliases
+  // Encrypted Facebook & YouTube RTMP credentials endpoints
+  // Supports both legacy /api/stream/credentials & platform-specific endpoints
   const handleGetCredentials = (_req: Request, res: Response) => {
     res.json(getRtmpPublicConfig());
   };
@@ -570,7 +662,7 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
     const serverUrl = typeof req.body?.serverUrl === 'string' ? req.body.serverUrl : '';
     const streamKey = typeof req.body?.streamKey === 'string' ? req.body.streamKey : undefined;
 
-    const check = validateRtmpUrl(serverUrl);
+    const check = validateRtmpUrl(serverUrl, 'Facebook Live');
     if (!check.valid || !check.normalized) {
       res.status(400).json({ error: check.error || 'Invalid RTMP server URL.' });
       return;
@@ -592,9 +684,47 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
     res.json(clearStreamKey());
   };
 
+  const handleSaveYoutubeCredentials = (req: Request, res: Response) => {
+    const serverUrl = typeof req.body?.serverUrl === 'string' ? req.body.serverUrl : '';
+    const streamKey = typeof req.body?.streamKey === 'string' ? req.body.streamKey : undefined;
+
+    const check = validateRtmpUrl(serverUrl, 'YouTube Live');
+    if (!check.valid || !check.normalized) {
+      res.status(400).json({ error: check.error || 'Invalid YouTube RTMP server URL.' });
+      return;
+    }
+
+    if (streamKey !== undefined && streamKey.trim().length > 0 && /[\s\r\n\0]/.test(streamKey.trim())) {
+      res.status(400).json({ error: 'YouTube Stream Key contains invalid whitespace or control characters.' });
+      return;
+    }
+
+    const updated = saveYoutubeRtmpConfig(
+      check.normalized,
+      streamKey && streamKey.trim().length > 0 ? streamKey : undefined,
+    );
+    res.json(updated);
+  };
+
+  app.get('/api/stream/destinations', requireAllowedOrigin, (_req, res) => {
+    res.json(getDestinationsPublicConfig());
+  });
+
   app.get('/api/stream/credentials', requireAllowedOrigin, handleGetCredentials);
   app.post('/api/stream/credentials', requireControlAccess, streamControlLimiter, handleSaveCredentials);
   app.delete('/api/stream/credentials', requireControlAccess, streamControlLimiter, handleDeleteCredentials);
+
+  app.get('/api/stream/credentials/facebook', requireAllowedOrigin, handleGetCredentials);
+  app.post('/api/stream/credentials/facebook', requireControlAccess, streamControlLimiter, handleSaveCredentials);
+  app.delete('/api/stream/credentials/facebook', requireControlAccess, streamControlLimiter, handleDeleteCredentials);
+
+  app.get('/api/stream/credentials/youtube', requireAllowedOrigin, (_req, res) => {
+    res.json(getYoutubeRtmpPublicConfig());
+  });
+  app.post('/api/stream/credentials/youtube', requireControlAccess, streamControlLimiter, handleSaveYoutubeCredentials);
+  app.delete('/api/stream/credentials/youtube', requireControlAccess, streamControlLimiter, (_req, res) => {
+    res.json(clearYoutubeStreamKey());
+  });
 
   app.get('/api/rtmp/config', requireAllowedOrigin, handleGetCredentials);
   app.post('/api/rtmp/config', requireControlAccess, streamControlLimiter, handleSaveCredentials);
@@ -751,6 +881,11 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
     const logoOpacity = clampNum(incoming.logoOpacity, 0.1, 1);
     if (logoOpacity !== undefined) sanitized.logoOpacity = logoOpacity;
 
+    const logoX = incoming.logoX === null ? null : clampNum(incoming.logoX, 2, 95);
+    if (logoX !== undefined || incoming.logoX === null) sanitized.logoX = logoX;
+    const logoY = incoming.logoY === null ? null : clampNum(incoming.logoY, 2, 95);
+    if (logoY !== undefined || incoming.logoY === null) sanitized.logoY = logoY;
+
     if (typeof incoming.headlineEnabled === 'boolean') sanitized.headlineEnabled = incoming.headlineEnabled;
     if (typeof incoming.headlineText === 'string') sanitized.headlineText = incoming.headlineText.slice(0, 180);
     const hlSize = clampNum(incoming.headlineFontSize, 16, 64);
@@ -783,6 +918,10 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
     const ltTxt = cleanHex(incoming.lowerThirdTextColor);
     if (ltTxt) sanitized.lowerThirdTextColor = ltTxt;
     if (isAnim(incoming.lowerThirdAnimation)) sanitized.lowerThirdAnimation = incoming.lowerThirdAnimation;
+    const ltX = incoming.lowerThirdX === null ? null : clampNum(incoming.lowerThirdX, 2, 90);
+    if (ltX !== undefined || incoming.lowerThirdX === null) sanitized.lowerThirdX = ltX;
+    const ltY = incoming.lowerThirdY === null ? null : clampNum(incoming.lowerThirdY, 2, 92);
+    if (ltY !== undefined || incoming.lowerThirdY === null) sanitized.lowerThirdY = ltY;
 
     if (typeof incoming.clockEnabled === 'boolean') sanitized.clockEnabled = incoming.clockEnabled;
     if (isPos(incoming.clockPosition)) sanitized.clockPosition = incoming.clockPosition;
@@ -801,6 +940,10 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
     if (clkBg) sanitized.clockBgColor = clkBg;
     const clkAlpha = clampNum(incoming.clockBgOpacity, 0, 1);
     if (clkAlpha !== undefined) sanitized.clockBgOpacity = clkAlpha;
+    const clkX = incoming.clockX === null ? null : clampNum(incoming.clockX, 2, 95);
+    if (clkX !== undefined || incoming.clockX === null) sanitized.clockX = clkX;
+    const clkY = incoming.clockY === null ? null : clampNum(incoming.clockY, 2, 95);
+    if (clkY !== undefined || incoming.clockY === null) sanitized.clockY = clkY;
 
     if (typeof incoming.tickerEnabled === 'boolean') sanitized.tickerEnabled = incoming.tickerEnabled;
     if (typeof incoming.tickerText === 'string') sanitized.tickerText = incoming.tickerText.slice(0, 500);
@@ -814,6 +957,38 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
     if (tkAlpha !== undefined) sanitized.tickerBgOpacity = tkAlpha;
     const tkSpeed = clampNum(incoming.tickerSpeed, 40, 240);
     if (tkSpeed !== undefined) sanitized.tickerSpeed = tkSpeed;
+
+    if (typeof incoming.customTextEnabled === 'boolean') sanitized.customTextEnabled = incoming.customTextEnabled;
+    if (typeof incoming.customText === 'string') sanitized.customText = incoming.customText.slice(0, 200);
+    const ctSize = clampNum(incoming.customTextFontSize, 14, 64);
+    if (ctSize !== undefined) sanitized.customTextFontSize = ctSize;
+    const ctColor = cleanHex(incoming.customTextColor);
+    if (ctColor) sanitized.customTextColor = ctColor;
+    const ctBg = cleanHex(incoming.customTextBgColor);
+    if (ctBg) sanitized.customTextBgColor = ctBg;
+    const ctAlpha = clampNum(incoming.customTextBgOpacity, 0, 1);
+    if (ctAlpha !== undefined) sanitized.customTextBgOpacity = ctAlpha;
+    if (
+      incoming.customTextAlign === 'left' ||
+      incoming.customTextAlign === 'center' ||
+      incoming.customTextAlign === 'right'
+    ) {
+      sanitized.customTextAlign = incoming.customTextAlign;
+    }
+    const ctX = clampNum(incoming.customTextX, 2, 95);
+    if (ctX !== undefined) sanitized.customTextX = ctX;
+    const ctY = clampNum(incoming.customTextY, 2, 95);
+    if (ctY !== undefined) sanitized.customTextY = ctY;
+
+    if (typeof incoming.imageOverlayEnabled === 'boolean') sanitized.imageOverlayEnabled = incoming.imageOverlayEnabled;
+    const ioX = clampNum(incoming.imageOverlayX, 2, 95);
+    if (ioX !== undefined) sanitized.imageOverlayX = ioX;
+    const ioY = clampNum(incoming.imageOverlayY, 2, 95);
+    if (ioY !== undefined) sanitized.imageOverlayY = ioY;
+    const ioScale = clampNum(incoming.imageOverlayScale, 5, 50);
+    if (ioScale !== undefined) sanitized.imageOverlayScale = ioScale;
+    const ioOpacity = clampNum(incoming.imageOverlayOpacity, 0.1, 1);
+    if (ioOpacity !== undefined) sanitized.imageOverlayOpacity = ioOpacity;
 
     const updated = saveOverlayConfig(sanitized);
     res.json(updated);
@@ -866,6 +1041,57 @@ export function createLivecastApp(options: CreateAppOptions = {}): express.Expre
       logoEnabled: false,
       logoPath: null,
       logoUrl: null,
+    });
+    res.json(updated);
+  });
+
+  app.post('/api/overlays/image', requireControlAccess, (req, res) => {
+    logoUpload.single('image')(req, res, (uploadErr: unknown) => {
+      if (uploadErr) {
+        res.status(400).json({ error: uploadErr instanceof Error ? uploadErr.message : 'Image overlay upload failed.' });
+        return;
+      }
+      if (!req.file) {
+        res.status(400).json({ error: 'No PNG image file uploaded.' });
+        return;
+      }
+      if (!isValidPngSignature(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+        res.status(400).json({ error: 'File signature check failed. Upload a valid PNG image.' });
+        return;
+      }
+
+      const current = getOverlayConfig();
+      if (current.imageOverlayPath && fs.existsSync(current.imageOverlayPath)) {
+        try {
+          fs.unlinkSync(current.imageOverlayPath);
+        } catch {
+          // ignore
+        }
+      }
+
+      const updated = saveOverlayConfig({
+        imageOverlayEnabled: true,
+        imageOverlayPath: req.file.path,
+        imageOverlayUrl: `/media/overlays/${encodeURIComponent(req.file.filename)}`,
+      });
+      res.status(201).json(updated);
+    });
+  });
+
+  app.delete('/api/overlays/image', requireControlAccess, (_req, res) => {
+    const current = getOverlayConfig();
+    if (current.imageOverlayPath && fs.existsSync(current.imageOverlayPath)) {
+      try {
+        fs.unlinkSync(current.imageOverlayPath);
+      } catch {
+        // ignore
+      }
+    }
+    const updated = saveOverlayConfig({
+      imageOverlayEnabled: false,
+      imageOverlayPath: null,
+      imageOverlayUrl: null,
     });
     res.json(updated);
   });
@@ -959,6 +1185,29 @@ export function attachWebSocketServer(server: http.Server): WebSocketServer {
       return;
     }
 
+    // Authenticated In-App Browser Live Capture (MediaRecorder WebM/MP4 -> FFmpeg FLV)
+    if (reqUrl.pathname === '/ws/web-ingest') {
+      const sessionId = reqUrl.searchParams.get('sessionId') || '';
+      const queryToken = reqUrl.searchParams.get('token') || '';
+      const origin = request.headers.origin;
+      if (!isOriginAllowed(origin, request.headers.host, request.headers['x-forwarded-host'])) {
+        socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+      if (!sessionId || !queryToken || !captureManager.verifyIngestToken(sessionId, queryToken)) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+
+      const mime = reqUrl.searchParams.get('mime') || 'video/webm';
+      captureWss.handleUpgrade(request, socket, head, (ws) => {
+        captureManager.attachWebIngestSocket(sessionId, ws, mime);
+      });
+      return;
+    }
+
     if (reqUrl.pathname !== '/ws') {
       if (server.listenerCount('upgrade') <= 1) {
         socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
@@ -968,12 +1217,14 @@ export function attachWebSocketServer(server: http.Server): WebSocketServer {
     }
 
     const origin = request.headers.origin;
+    const clientHeader = request.headers['x-livecast-client'];
+    const isAndroidClient = typeof clientHeader === 'string' && clientHeader.trim() === 'livecast-android';
     if (!isOriginAllowed(origin, request.headers.host, request.headers['x-forwarded-host'])) {
       socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
       socket.destroy();
       return;
     }
-    if (!origin && process.env.NODE_ENV === 'production') {
+    if (!origin && !isAndroidClient && process.env.NODE_ENV === 'production') {
       socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
       socket.destroy();
       return;

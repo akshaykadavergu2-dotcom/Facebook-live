@@ -20,9 +20,12 @@ class ScreenVideoEncoder(
     private val mediaProjection: MediaProjection,
     private val width: Int = 1280,
     private val height: Int = 720,
+    private val targetFps: Int = 30,
+    private val bitrateBps: Int = 3_000_000,
     private val densityDpi: Int,
     private val monotonicClockBaseUs: Long,
-    private val wsClient: CaptureWebSocketClient,
+    private val wsClient: CaptureWebSocketClient?,
+    private val mp4Recorder: () -> Mp4ScreenRecorder? = { null },
     private val onStats: (fps: Int, width: Int, height: Int, status: VideoCaptureStatus) -> Unit,
     private val onError: (String) -> Unit,
 ) {
@@ -31,18 +34,23 @@ class ScreenVideoEncoder(
     private var virtualDisplay: VirtualDisplay? = null
     private var drainJob: Job? = null
     private val running = AtomicBoolean(false)
+    @Volatile
+    private var latestOutputFormat: MediaFormat? = null
+
+    fun currentOutputFormat(): MediaFormat? = latestOutputFormat
 
     fun start() {
         if (running.getAndSet(true)) return
 
         try {
+            val safeFps = targetFps.coerceIn(15, 60)
             val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
                 setInteger(
                     MediaFormat.KEY_COLOR_FORMAT,
                     MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface,
                 )
-                setInteger(MediaFormat.KEY_BIT_RATE, 3_000_000)
-                setInteger(MediaFormat.KEY_FRAME_RATE, 30)
+                setInteger(MediaFormat.KEY_BIT_RATE, bitrateBps)
+                setInteger(MediaFormat.KEY_FRAME_RATE, safeFps)
                 setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2)
             }
 
@@ -91,9 +99,11 @@ class ScreenVideoEncoder(
                 when {
                     outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                         val outFormat = encoder.outputFormat
+                        latestOutputFormat = outFormat
+                        mp4Recorder()?.onVideoFormatChanged(outFormat)
                         val configBytes = extractAnnexBConfig(outFormat)
                         if (configBytes != null && configBytes.isNotEmpty()) {
-                            wsClient.sendBinaryFrame(
+                            wsClient?.sendBinaryFrame(
                                 frameType = IngestProtocol.FRAME_VIDEO_CONFIG,
                                 isKeyframe = true,
                                 ptsUs = 0L,
@@ -113,7 +123,7 @@ class ScreenVideoEncoder(
 
                             val isCodecConfig = (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0
                             if (isCodecConfig) {
-                                wsClient.sendBinaryFrame(
+                                wsClient?.sendBinaryFrame(
                                     frameType = IngestProtocol.FRAME_VIDEO_CONFIG,
                                     isKeyframe = true,
                                     ptsUs = 0L,
@@ -124,7 +134,7 @@ class ScreenVideoEncoder(
                                 if (!sentConfig) {
                                     val fallbackCfg = extractAnnexBConfig(encoder.outputFormat)
                                     if (fallbackCfg != null && fallbackCfg.isNotEmpty()) {
-                                        wsClient.sendBinaryFrame(
+                                        wsClient?.sendBinaryFrame(
                                             frameType = IngestProtocol.FRAME_VIDEO_CONFIG,
                                             isKeyframe = true,
                                             ptsUs = 0L,
@@ -140,12 +150,17 @@ class ScreenVideoEncoder(
                                 }
                                 val isKey = (info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0
                                 val relPtsUs = (info.presentationTimeUs - base).coerceAtLeast(0L)
-                                wsClient.sendBinaryFrame(
+                                wsClient?.sendBinaryFrame(
                                     frameType = IngestProtocol.FRAME_VIDEO_DATA,
                                     isKeyframe = isKey,
                                     ptsUs = relPtsUs,
                                     payload = bytes,
                                 )
+                                val activeRec = mp4Recorder()
+                                if (activeRec != null) {
+                                    latestOutputFormat?.let { activeRec.onVideoFormatChanged(it) }
+                                    activeRec.writeVideoSample(bytes, relPtsUs, isKey)
+                                }
 
                                 windowFrames += 1
                                 val now = System.currentTimeMillis()

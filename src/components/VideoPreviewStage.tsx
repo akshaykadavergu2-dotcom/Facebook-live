@@ -122,7 +122,16 @@ export function VideoPreviewStage({
 
   useEffect(() => {
     if (!onPlaybackMetaChange) return;
-    if (sourceType === 'android-capture') {
+    if ((sourceType === 'camera' || sourceType === 'screen' || sourceType === 'android-capture') && captureStream) {
+      const settings = captureStream.getVideoTracks()[0]?.getSettings?.();
+      onPlaybackMetaChange({
+        playbackStatus: 'Playing',
+        width: (typeof settings?.width === 'number' && settings.width > 0 ? settings.width : captureTelemetry?.width) || 1280,
+        height: (typeof settings?.height === 'number' && settings.height > 0 ? settings.height : captureTelemetry?.height) || 720,
+        durationSec: 0,
+        muted: true,
+      });
+    } else if (sourceType === 'android-capture') {
       onPlaybackMetaChange({
         playbackStatus: isAndroidCapturing ? 'Playing' : 'Idle',
         width: captureTelemetry?.width || 0,
@@ -145,14 +154,6 @@ export function VideoPreviewStage({
         height: 0,
         durationSec: 0,
         muted: false,
-      });
-    } else if ((sourceType === 'camera' || sourceType === 'screen') && captureStream) {
-      onPlaybackMetaChange({
-        playbackStatus: 'Playing',
-        width: 1280,
-        height: 720,
-        durationSec: 0,
-        muted: true,
       });
     } else {
       onPlaybackMetaChange({
@@ -181,7 +182,7 @@ export function VideoPreviewStage({
   useEffect(() => {
     const el = captureVideoRef.current;
     if (!el) return;
-    if ((sourceType === 'camera' || sourceType === 'screen') && captureStream) {
+    if ((sourceType === 'camera' || sourceType === 'screen' || sourceType === 'android-capture') && captureStream) {
       el.srcObject = captureStream;
       el.play().catch(() => {
         // Autoplay fallback handled by user interaction
@@ -256,7 +257,15 @@ export function VideoPreviewStage({
 
   return (
     <div className="relative w-full max-w-full aspect-video bg-[#07090D] rounded-xl overflow-hidden border border-[#232B3A]">
-      {sourceType === 'android-capture' && isAndroidCapturing ? (
+      {(sourceType === 'android-capture' || sourceType === 'camera' || sourceType === 'screen') && captureStream ? (
+        <video
+          ref={captureVideoRef}
+          autoPlay
+          muted
+          playsInline
+          className="w-full h-full object-contain bg-black"
+        />
+      ) : sourceType === 'android-capture' && isAndroidCapturing ? (
         <video
           ref={videoRef}
           key={androidPreviewUrl}
@@ -282,21 +291,19 @@ export function VideoPreviewStage({
             <Smartphone className="w-5 h-5 text-blue-400" />
           </div>
           <p className="text-xs sm:text-sm font-medium text-slate-200">
-            {captureTelemetry?.status === 'WaitingForApp'
-              ? 'Waiting for Android Companion App'
-              : captureTelemetry?.status === 'Connecting'
-                ? 'Android Connected · Waiting for Capture Permission'
-                : captureTelemetry?.status === 'Reconnecting'
-                  ? 'Android Capture Reconnecting...'
-                  : captureTelemetry?.status === 'Stopped'
-                    ? 'Android Capture Stopped'
-                    : captureTelemetry?.status === 'Error'
-                      ? 'Android Capture Error'
-                      : 'Android Live Capture Inactive'}
+            {captureTelemetry?.status === 'Connecting'
+              ? 'Connecting In-App Live Stream...'
+              : captureTelemetry?.status === 'Reconnecting'
+                ? 'Live Capture Reconnecting...'
+                : captureTelemetry?.status === 'Stopped'
+                  ? 'Live Capture Stopped'
+                  : captureTelemetry?.status === 'Error'
+                    ? 'Live Capture Error'
+                    : 'In-App Live Capture Ready'}
           </p>
           <p className="text-[11px] sm:text-xs text-slate-400 mt-1 max-w-md">
             {captureTelemetry?.lastError ||
-              'Tap CONNECT ANDROID, open the Android Capture companion app, grant MediaProjection consent on Monitor A, and frames will appear here live.'}
+              'Start Screen/Tab Capture or Camera + Mic Live right inside this app — no separate screen recording app or install needed.'}
           </p>
         </div>
       ) : sourceType === 'uploaded' && selectedVideo ? (
@@ -355,14 +362,6 @@ export function VideoPreviewStage({
           }
           className="w-full h-full object-contain bg-black"
         />
-      ) : (sourceType === 'camera' || sourceType === 'screen') && captureStream ? (
-        <video
-          ref={captureVideoRef}
-          autoPlay
-          muted
-          playsInline
-          className="w-full h-full object-contain bg-black"
-        />
       ) : (
         <div className="w-full h-full flex flex-col items-center justify-center p-4 sm:p-6 text-center bg-[#090C11]">
           <div className="w-11 h-11 rounded-xl bg-[#141A24] border border-[#232B3A] flex items-center justify-center mb-2.5">
@@ -376,17 +375,17 @@ export function VideoPreviewStage({
           </div>
           <p className="text-xs sm:text-sm font-medium text-slate-200">
             {sourceType === 'camera'
-              ? 'Camera Preview Inactive'
+              ? 'In-App Camera Inactive'
               : sourceType === 'screen'
-                ? 'Screen Capture Inactive'
-                : 'No Facebook Broadcast Source Loaded'}
+                ? 'In-App Screen Capture Inactive'
+                : 'No Broadcast Source Loaded'}
           </p>
           <p className="text-[11px] sm:text-xs text-slate-400 mt-1 max-w-md">
             {sourceType === 'camera'
-              ? 'Start camera + microphone below to record and upload a clip.'
+              ? 'Start Camera + Microphone Live below to stream directly without external apps.'
               : sourceType === 'screen'
-                ? 'Start Android screen capture where supported or upload a recording.'
-                : 'Select or upload an MP4/MOV/WebM clip, select Android Live Capture, or enter an authorized HTTPS/HLS/RTMP/SRT stream URL.'}
+                ? 'Start In-App Screen/Tab Live Capture where supported or switch to Camera + Mic Live.'
+                : 'Select or upload an MP4/MOV/WebM clip, use In-App Live Capture, or enter an authorized HTTPS/HLS/RTMP/SRT URL.'}
           </p>
         </div>
       )}
@@ -413,18 +412,12 @@ export function VideoPreviewStage({
             <span>CONNECTING</span>
           </div>
         ) : null}
-        {isAndroidCapturing && (
+        {(isAndroidCapturing || (captureStream && sourceType === 'android-capture')) && (
           <div className="flex items-center gap-1.5 bg-emerald-600/95 text-white px-2 py-0.5 sm:px-2.5 sm:py-1 rounded text-[10px] sm:text-[11px] font-semibold tracking-wider font-mono">
             <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
             <span>LIVE CAPTURE</span>
           </div>
         )}
-        {streamStatus === 'Offline' && (sourceType === 'camera' || sourceType === 'screen') && captureStream ? (
-          <div className="flex items-center gap-1.5 bg-[#0B0E14]/90 border border-blue-500/40 text-blue-200 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded text-[10px] sm:text-[11px] font-medium">
-            <Camera className="w-3 h-3 text-blue-400 shrink-0" />
-            <span>{sourceType === 'camera' ? 'Camera (Record to Upload)' : 'Screen (Record to Upload)'}</span>
-          </div>
-        ) : null}
       </div>
 
       {/* Live Composited Graphics Overlays */}

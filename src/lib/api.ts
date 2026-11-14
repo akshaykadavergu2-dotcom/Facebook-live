@@ -1,6 +1,9 @@
 import type {
   AndroidCaptureSessionInfo,
   AndroidCaptureTelemetry,
+  DestinationId,
+  DestinationMode,
+  DestinationsConfigResponse,
   OverlayConfig,
   PipelineCheckResult,
   RtmpPublicConfig,
@@ -60,6 +63,33 @@ export function getWebSocketUrl(): string {
   }
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${protocol}//${window.location.host}/ws`;
+}
+
+export function getWebIngestUrl(session: AndroidCaptureSessionInfo, mimeType?: string): string {
+  const params = new URLSearchParams({
+    sessionId: session.sessionId,
+    token: session.ingestToken,
+  });
+  if (mimeType) {
+    params.set('mime', mimeType);
+  }
+  if (API_BASE_URL) {
+    try {
+      const parsed = new URL(API_BASE_URL);
+      const wsProto = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
+      return `${wsProto}//${parsed.host}/ws/web-ingest?${params.toString()}`;
+    } catch {
+      const wsBase = API_BASE_URL.replace(/^https:\/\//i, 'wss://').replace(/^http:\/\//i, 'ws://');
+      return `${wsBase}/ws/web-ingest?${params.toString()}`;
+    }
+  }
+  if (session.wsWebIngestUrl) {
+    return mimeType
+      ? `${session.wsWebIngestUrl}&mime=${encodeURIComponent(mimeType)}`
+      : session.wsWebIngestUrl;
+  }
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.host}/ws/web-ingest?${params.toString()}`;
 }
 
 export class ApiError extends Error {
@@ -276,6 +306,7 @@ export const api = {
     directUrl?: string;
     quality: StreamQualityProfile;
     loopVideo: boolean;
+    destinationMode?: DestinationMode;
   }) =>
     requestJson<{ telemetry: StreamTelemetry }>('/api/stream/start', {
       method: 'POST',
@@ -283,6 +314,14 @@ export const api = {
     }),
   stopStream: () =>
     requestJson<{ telemetry: StreamTelemetry }>('/api/stream/stop', { method: 'POST' }),
+  startDestination: (dest: DestinationId) =>
+    requestJson<{ telemetry: StreamTelemetry }>(`/api/stream/destination/${dest}/start`, {
+      method: 'POST',
+    }),
+  stopDestination: (dest: DestinationId) =>
+    requestJson<{ telemetry: StreamTelemetry }>(`/api/stream/destination/${dest}/stop`, {
+      method: 'POST',
+    }),
   validatePipeline: (payload: {
     sourceType: VideoSourceType;
     videoId?: string;
@@ -294,6 +333,7 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  getDestinations: () => requestJson<DestinationsConfigResponse>('/api/stream/destinations'),
   getRtmpConfig: () => requestJson<RtmpPublicConfig>('/api/stream/credentials'),
   saveRtmpConfig: (serverUrl: string, streamKey?: string) =>
     requestJson<RtmpPublicConfig>('/api/stream/credentials', {
@@ -301,6 +341,13 @@ export const api = {
       body: JSON.stringify({ serverUrl, streamKey }),
     }),
   clearRtmpKey: () => requestJson<RtmpPublicConfig>('/api/stream/credentials', { method: 'DELETE' }),
+  saveYoutubeRtmpConfig: (serverUrl: string, streamKey?: string) =>
+    requestJson<RtmpPublicConfig>('/api/stream/credentials/youtube', {
+      method: 'POST',
+      body: JSON.stringify({ serverUrl, streamKey }),
+    }),
+  clearYoutubeRtmpKey: () =>
+    requestJson<RtmpPublicConfig>('/api/stream/credentials/youtube', { method: 'DELETE' }),
 
   getVideos: () => requestJson<{ videos: VideoAsset[] }>('/api/videos'),
   uploadVideo: (file: File) => {

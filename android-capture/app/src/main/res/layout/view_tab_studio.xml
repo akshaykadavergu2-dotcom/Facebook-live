@@ -1,0 +1,521 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="14dp">
+
+        <!-- Interactive 16:9 Overlay Canvas -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_card_blue_purple"
+            android:orientation="vertical"
+            android:padding="12dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="BROADCAST OVERLAY STUDIO"
+                    android:textColor="@color/studio_cyan"
+                    android:textSize="11sp"
+                    android:textStyle="bold" />
+
+                <Button
+                    android:id="@+id/btnStudioSaveOverlays"
+                    android:layout_width="wrap_content"
+                    android:layout_height="34dp"
+                    android:background="@drawable/bg_btn_teal"
+                    android:minWidth="0dp"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:text="Apply Live"
+                    android:textAllCaps="false"
+                    android:textColor="#FFFFFF"
+                    android:textSize="11sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <com.livecast.capture.DraggableOverlayCanvasView
+                android:id="@+id/overlayPreviewCanvas"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Touch-Drag Layer Target:"
+                android:textColor="@color/studio_text_muted"
+                android:textSize="11sp" />
+
+            <HorizontalScrollView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:scrollbars="none">
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/btnDragTargetText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="34dp"
+                        android:layout_marginEnd="6dp"
+                        android:background="@drawable/bg_pill_selected"
+                        android:minWidth="0dp"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="12dp"
+                        android:text="Custom Text"
+                        android:textAllCaps="false"
+                        android:textColor="#FFFFFF"
+                        android:textSize="11sp" />
+
+                    <Button
+                        android:id="@+id/btnDragTargetImage"
+                        android:layout_width="wrap_content"
+                        android:layout_height="34dp"
+                        android:layout_marginEnd="6dp"
+                        android:background="@drawable/bg_pill_unselected"
+                        android:minWidth="0dp"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="12dp"
+                        android:text="PNG Image"
+                        android:textAllCaps="false"
+                        android:textColor="@color/studio_text_muted"
+                        android:textSize="11sp" />
+
+                    <Button
+                        android:id="@+id/btnDragTargetLogo"
+                        android:layout_width="wrap_content"
+                        android:layout_height="34dp"
+                        android:layout_marginEnd="6dp"
+                        android:background="@drawable/bg_pill_unselected"
+                        android:minWidth="0dp"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="12dp"
+                        android:text="Logo"
+                        android:textAllCaps="false"
+                        android:textColor="@color/studio_text_muted"
+                        android:textSize="11sp" />
+
+                    <Button
+                        android:id="@+id/btnDragTargetClock"
+                        android:layout_width="wrap_content"
+                        android:layout_height="34dp"
+                        android:layout_marginEnd="6dp"
+                        android:background="@drawable/bg_pill_unselected"
+                        android:minWidth="0dp"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="12dp"
+                        android:text="Clock"
+                        android:textAllCaps="false"
+                        android:textColor="@color/studio_text_muted"
+                        android:textSize="11sp" />
+
+                    <Button
+                        android:id="@+id/btnDragTargetLowerThird"
+                        android:layout_width="wrap_content"
+                        android:layout_height="34dp"
+                        android:background="@drawable/bg_pill_unselected"
+                        android:minWidth="0dp"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="12dp"
+                        android:text="Lower Third"
+                        android:textAllCaps="false"
+                        android:textColor="@color/studio_text_muted"
+                        android:textSize="11sp" />
+                </LinearLayout>
+            </HorizontalScrollView>
+
+            <TextView
+                android:id="@+id/tvStudioOverlayStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="Drag on the 16:9 canvas above, then tap Apply Live."
+                android:textColor="@color/studio_text_muted"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <!-- Channel Logo & Custom Image Overlay Card -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/bg_card_navy"
+            android:orientation="vertical"
+            android:padding="12dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="CHANNEL LOGO &amp; PNG IMAGE OVERLAY"
+                android:textColor="@color/studio_blue"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/swLogoEnabled"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Channel Logo"
+                    android:textColor="@color/studio_text_primary"
+                    android:textSize="13sp" />
+
+                <Button
+                    android:id="@+id/btnUploadLogo"
+                    android:layout_width="wrap_content"
+                    android:layout_height="34dp"
+                    android:layout_marginEnd="6dp"
+                    android:background="@drawable/bg_pill_unselected"
+                    android:minWidth="0dp"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:text="Upload PNG"
+                    android:textAllCaps="false"
+                    android:textColor="@color/studio_cyan"
+                    android:textSize="11sp" />
+
+                <Button
+                    android:id="@+id/btnRemoveLogo"
+                    android:layout_width="wrap_content"
+                    android:layout_height="34dp"
+                    android:background="@drawable/bg_pill_unselected"
+                    android:minWidth="0dp"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:text="Clear"
+                    android:textAllCaps="false"
+                    android:textColor="@color/studio_rose"
+                    android:textSize="11sp" />
+            </LinearLayout>
+
+            <SeekBar
+                android:id="@+id/seekLogoScale"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:max="30"
+                android:progress="12" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="8dp"
+                android:layout_marginBottom="8dp"
+                android:background="@color/studio_border" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <androidx.appcompat.widget.SwitchCompat
+                    android:id="@+id/swImageOverlayEnabled"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Custom PNG Image"
+                    android:textColor="@color/studio_text_primary"
+                    android:textSize="13sp" />
+
+                <Button
+                    android:id="@+id/btnUploadImageOverlay"
+                    android:layout_width="wrap_content"
+                    android:layout_height="34dp"
+                    android:layout_marginEnd="6dp"
+                    android:background="@drawable/bg_pill_unselected"
+                    android:minWidth="0dp"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:text="Pick PNG"
+                    android:textAllCaps="false"
+                    android:textColor="@color/studio_purple"
+                    android:textSize="11sp" />
+
+                <Button
+                    android:id="@+id/btnRemoveImageOverlay"
+                    android:layout_width="wrap_content"
+                    android:layout_height="34dp"
+                    android:background="@drawable/bg_pill_unselected"
+                    android:minWidth="0dp"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:text="Clear"
+                    android:textAllCaps="false"
+                    android:textColor="@color/studio_rose"
+                    android:textSize="11sp" />
+            </LinearLayout>
+
+            <SeekBar
+                android:id="@+id/seekImageScale"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:max="45"
+                android:progress="18" />
+        </LinearLayout>
+
+        <!-- Custom Text + Clock Card -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/bg_card_navy"
+            android:orientation="vertical"
+            android:padding="12dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="CUSTOM TEXT &amp; LIVE CLOCK"
+                android:textColor="@color/studio_purple"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/swCustomTextEnabled"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="Enable Custom Draggable Text"
+                android:textColor="@color/studio_text_primary"
+                android:textSize="13sp" />
+
+            <EditText
+                android:id="@+id/etCustomText"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:layout_marginTop="6dp"
+                android:background="@drawable/bg_input_field"
+                android:hint="On-screen custom text..."
+                android:inputType="text"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:text="LIVE BROADCAST"
+                android:textColor="@color/studio_text_primary"
+                android:textColorHint="@color/studio_text_muted"
+                android:textSize="12sp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="8dp"
+                    android:text="Align:"
+                    android:textColor="@color/studio_text_muted"
+                    android:textSize="11sp" />
+
+                <Button
+                    android:id="@+id/btnAlignLeft"
+                    android:layout_width="0dp"
+                    android:layout_height="32dp"
+                    android:layout_marginEnd="4dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_pill_unselected"
+                    android:text="Left"
+                    android:textAllCaps="false"
+                    android:textColor="@color/studio_text_primary"
+                    android:textSize="11sp" />
+
+                <Button
+                    android:id="@+id/btnAlignCenter"
+                    android:layout_width="0dp"
+                    android:layout_height="32dp"
+                    android:layout_marginEnd="4dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_pill_selected"
+                    android:text="Center"
+                    android:textAllCaps="false"
+                    android:textColor="#FFFFFF"
+                    android:textSize="11sp" />
+
+                <Button
+                    android:id="@+id/btnAlignRight"
+                    android:layout_width="0dp"
+                    android:layout_height="32dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/bg_pill_unselected"
+                    android:text="Right"
+                    android:textAllCaps="false"
+                    android:textColor="@color/studio_text_primary"
+                    android:textSize="11sp" />
+            </LinearLayout>
+
+            <SeekBar
+                android:id="@+id/seekCustomTextSize"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:max="48"
+                android:progress="24" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/swClockEnabled"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="Show Live Clock / Date Badge"
+                android:textColor="@color/studio_text_primary"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <!-- Broadcast Graphics: Headline, Breaking News, Lower Third, Ticker -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/bg_card_navy"
+            android:orientation="vertical"
+            android:padding="12dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="HEADLINES, BREAKING NEWS, LOWER THIRD &amp; TICKER"
+                android:textColor="@color/studio_cyan"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/swHeadlineEnabled"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="Top Headline Banner"
+                android:textColor="@color/studio_text_primary"
+                android:textSize="13sp" />
+
+            <EditText
+                android:id="@+id/etHeadlineText"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:background="@drawable/bg_input_field"
+                android:hint="Headline banner text"
+                android:inputType="text"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:text="LIVE STUDIO BROADCAST"
+                android:textColor="@color/studio_text_primary"
+                android:textColorHint="@color/studio_text_muted"
+                android:textSize="12sp" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/swBreakingNewsEnabled"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Breaking News Alert"
+                android:textColor="@color/studio_text_primary"
+                android:textSize="13sp" />
+
+            <EditText
+                android:id="@+id/etBreakingNewsText"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:background="@drawable/bg_input_field"
+                android:hint="Breaking news ticker copy"
+                android:inputType="text"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:text="Live studio coverage in progress."
+                android:textColor="@color/studio_text_primary"
+                android:textColorHint="@color/studio_text_muted"
+                android:textSize="12sp" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/swLowerThirdEnabled"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Lower Third Title Card"
+                android:textColor="@color/studio_text_primary"
+                android:textSize="13sp" />
+
+            <EditText
+                android:id="@+id/etLowerThirdTitle"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:background="@drawable/bg_input_field"
+                android:hint="Lower third main title"
+                android:inputType="text"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:text="LIVECAST STUDIO"
+                android:textColor="@color/studio_text_primary"
+                android:textColorHint="@color/studio_text_muted"
+                android:textSize="12sp" />
+
+            <EditText
+                android:id="@+id/etLowerThirdSubtitle"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:layout_marginTop="6dp"
+                android:background="@drawable/bg_input_field"
+                android:hint="Lower third subtitle"
+                android:inputType="text"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:text="Authorized Live Broadcast Feed"
+                android:textColor="@color/studio_text_primary"
+                android:textColorHint="@color/studio_text_muted"
+                android:textSize="12sp" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/swTickerEnabled"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Bottom Scrolling News Ticker"
+                android:textColor="@color/studio_text_primary"
+                android:textSize="13sp" />
+
+            <EditText
+                android:id="@+id/etTickerText"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:background="@drawable/bg_input_field"
+                android:hint="Scrolling bottom ticker text"
+                android:inputType="text"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:text="Welcome to the live broadcast. Stay tuned for updates."
+                android:textColor="@color/studio_text_primary"
+                android:textColorHint="@color/studio_text_muted"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+    </LinearLayout>
+</ScrollView>

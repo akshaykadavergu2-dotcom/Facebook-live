@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import type {
   AndroidCaptureTelemetry,
+  DestinationMode,
   OverlayConfig,
   PipelineCheckResult,
   RtmpPublicConfig,
@@ -31,6 +32,7 @@ import type {
   YouTubeValidationResult,
 } from '../../shared/types';
 import { api, formatBytes, formatDuration } from '../lib/api';
+import type { InAppLiveCaptureState } from '../lib/useInAppLiveCapture';
 import type { NavSection } from './Sidebar';
 import {
   VideoPreviewStage,
@@ -42,6 +44,9 @@ import { YouTubeMonitorCard } from './YouTubeMonitorCard';
 interface LiveStudioViewProps {
   telemetry: StreamTelemetry;
   captureTelemetry?: AndroidCaptureTelemetry | null;
+  inAppCapture: InAppLiveCaptureState;
+  destinationMode: DestinationMode;
+  onChangeDestinationMode: (mode: DestinationMode) => void;
   logs: StreamLogEntry[];
   videos: VideoAsset[];
   overlays: OverlayConfig;
@@ -79,6 +84,9 @@ interface DirectProbeSummary {
 export function LiveStudioView({
   telemetry,
   captureTelemetry = null,
+  inAppCapture,
+  destinationMode,
+  onChangeDestinationMode,
   logs,
   videos,
   overlays,
@@ -457,6 +465,7 @@ export function LiveStudioView({
         directUrl: apiSource === 'direct-url' ? directUrl : undefined,
         quality,
         loopVideo,
+        destinationMode,
       });
       onTelemetryUpdated(res.telemetry);
     } catch (err) {
@@ -619,7 +628,11 @@ export function LiveStudioView({
             sourceType={effectiveFbSource}
             selectedVideo={selectedVideo}
             directUrl={directUrl}
-            captureStream={captureStream}
+            captureStream={
+              effectiveFbSource === 'android-capture'
+                ? inAppCapture.captureStream ?? captureStream
+                : captureStream
+            }
             captureTelemetry={captureTelemetry}
             overlays={overlays}
             streamStatus={telemetry.status}
@@ -762,7 +775,7 @@ export function LiveStudioView({
               <div className="bg-[#0E131B] border border-[#232B3A] rounded-xl p-3.5 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="text-xs font-semibold text-slate-100">
-                    Android Native Companion Capture Input
+                    Built-In Live Screen / Camera Capture Input
                   </div>
                   <span
                     className={`text-xs font-mono font-semibold ${
@@ -773,7 +786,7 @@ export function LiveStudioView({
                   </span>
                 </div>
                 <p className="text-xs text-slate-400 leading-relaxed">
-                  Feeds live H.264 video and permitted playback audio from Monitor A via the dedicated Android Capture companion app directly into Monitor B and FFmpeg RTMPS.
+                  Streams live Screen/Tab or Camera+Mic video and permitted audio directly from this studio into Monitor B and the FFmpeg RTMPS compositor—no separate screen recording app required.
                 </p>
                 <div className="grid grid-cols-3 gap-2 text-xs">
                   <div className="bg-[#080B10] border border-[#232B3A] rounded-lg px-2.5 py-2">
@@ -799,13 +812,54 @@ export function LiveStudioView({
                     </div>
                   </div>
                 </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {inAppCapture.hasGetDisplayMedia && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void inAppCapture.startScreenLiveCapture(
+                          youtubeResult?.valid ? youtubeResult.watchUrl || null : null,
+                        )
+                      }
+                      disabled={inAppCapture.captureBusy}
+                      className="min-h-[44px] px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
+                    >
+                      <MonitorSmartphone className="w-4 h-4 shrink-0" />
+                      <span>Start Screen / Tab Live</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void inAppCapture.startCameraLiveCapture(
+                        inAppCapture.cameraFacing,
+                        youtubeResult?.valid ? youtubeResult.watchUrl || null : null,
+                      )
+                    }
+                    disabled={inAppCapture.captureBusy || !inAppCapture.hasGetUserMedia}
+                    className="min-h-[44px] px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    <Camera className="w-4 h-4 shrink-0" />
+                    <span>Start Camera + Mic Live</span>
+                  </button>
+                </div>
+                {inAppCapture.captureStream && (
+                  <button
+                    type="button"
+                    onClick={() => void inAppCapture.stopInAppCapture()}
+                    className="w-full min-h-[40px] px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold flex items-center justify-center gap-2"
+                  >
+                    <Square className="w-3.5 h-3.5 shrink-0" />
+                    <span>Stop Live Capture</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => onNavigate('android-capture')}
-                  className="w-full min-h-[44px] px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center justify-center gap-2"
+                  className="w-full min-h-[40px] px-4 py-2 rounded-xl border border-[#2C374C] bg-[#181F2C] hover:bg-[#222C3E] text-slate-200 text-xs font-medium flex items-center justify-center gap-2"
                 >
-                  <Smartphone className="w-4 h-4 shrink-0" />
-                  <span>Open Android Live Capture Panel</span>
+                  <Smartphone className="w-4 h-4 text-blue-400 shrink-0" />
+                  <span>Open Full In-App Live Capture Deck</span>
                 </button>
               </div>
             )}
@@ -1112,6 +1166,35 @@ export function LiveStudioView({
                 <span className="break-words min-w-0">{actionError || telemetry.lastError}</span>
               </div>
             )}
+
+            <div className="space-y-2">
+              <label className="block text-xs font-medium text-slate-300">
+                Broadcast Destination
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {(
+                  [
+                    { id: 'facebook', label: 'Facebook' },
+                    { id: 'youtube', label: 'YouTube' },
+                    { id: 'both', label: 'FB + YT' },
+                  ] as const
+                ).map((dest) => (
+                  <button
+                    key={dest.id}
+                    type="button"
+                    disabled={isStreamingOrConnecting}
+                    onClick={() => onChangeDestinationMode(dest.id)}
+                    className={`min-h-[40px] px-2.5 py-1.5 rounded-xl border text-xs font-semibold transition-colors disabled:opacity-50 ${
+                      destinationMode === dest.id
+                        ? 'bg-blue-600/20 border-blue-500 text-slate-100'
+                        : 'bg-[#0E131B] border-[#232B3A] text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {dest.label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
             <div className="space-y-2">
               <label className="block text-xs font-medium text-slate-300">

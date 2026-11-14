@@ -17,6 +17,7 @@ interface OverlaysViewProps {
   sourceType: ProgramMonitorSource;
   selectedVideo: VideoAsset | null;
   directUrl: string;
+  captureStream?: MediaStream | null;
   captureTelemetry?: AndroidCaptureTelemetry | null;
   streamStatus: StreamStatusState;
 }
@@ -27,6 +28,7 @@ export function OverlaysView({
   sourceType,
   selectedVideo,
   directUrl,
+  captureStream = null,
   captureTelemetry = null,
   streamStatus,
 }: OverlaysViewProps) {
@@ -145,6 +147,7 @@ export function OverlaysView({
             sourceType={programSource}
             selectedVideo={selectedVideo}
             directUrl={directUrl}
+            captureStream={captureStream}
             captureTelemetry={captureTelemetry}
             overlays={draft}
             streamStatus={streamStatus}

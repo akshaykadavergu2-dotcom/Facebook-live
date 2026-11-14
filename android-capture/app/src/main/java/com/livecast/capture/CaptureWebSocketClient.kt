@@ -18,12 +18,14 @@ import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 class CaptureWebSocketClient(
     private val scope: CoroutineScope,
     private val onConnectionState: (ConnectionCaptureStatus, String?) -> Unit,
     private val onRemoteCommand: (type: String, youtubeUrl: String?) -> Unit,
     private val onLatencyMeasured: (Long) -> Unit,
+    private val onThroughputMeasured: ((framesSent: Long, bitrateKbps: Int) -> Unit)? = null,
 ) {
     private data class QueuedFrame(
         val bytes: ByteArray,
@@ -36,8 +38,10 @@ class CaptureWebSocketClient(
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .build()
 
-    private val sendQueue = ArrayBlockingQueue<QueuedFrame>(96)
+    private val sendQueue = ArrayBlockingQueue<QueuedFrame>(128)
     private val sequence = AtomicInteger(0)
+    private val totalFramesSent = AtomicLong(0L)
+    private val windowBytesSent = AtomicLong(0L)
     private val closedByUser = AtomicBoolean(false)
 
     @Volatile
@@ -51,6 +55,7 @@ class CaptureWebSocketClient(
 
     private var senderJob: Job? = null
     private var reconnectAttempt = 0
+    private var windowStartMs = System.currentTimeMillis()
 
     fun connect(backendUrl: String, sessionId: String, ingestToken: String) {
         closedByUser.set(false)
@@ -58,6 +63,9 @@ class CaptureWebSocketClient(
         targetSessionId = sessionId.trim()
         targetToken = ingestToken.trim()
         reconnectAttempt = 0
+        totalFramesSent.set(0L)
+        windowBytesSent.set(0L)
+        windowStartMs = System.currentTimeMillis()
         try {
             activeWs?.close(1000, "Reconnecting with updated session")
         } catch (_: Exception) {
@@ -89,6 +97,7 @@ class CaptureWebSocketClient(
 
         val request = Request.Builder()
             .url(buildWsUrl())
+            .header("X-Livecast-Client", "livecast-android")
             .build()
 
         lateinit var createdSocket: WebSocket
@@ -119,7 +128,6 @@ class CaptureWebSocketClient(
                     }
                     onRemoteCommand(type, yt)
                 } catch (_: Exception) {
-                    // ignore malformed control packets
                 }
             }
 
@@ -136,7 +144,7 @@ class CaptureWebSocketClient(
                 } else if (code == 4004) {
                     onConnectionState(
                         ConnectionCaptureStatus.Error,
-                        "Capture session not found on backend (4004). Tap CONNECT ANDROID in web studio.",
+                        "Capture session expired or not found (4004). Reconnect to generate a fresh session.",
                     )
                 } else {
                     scheduleReconnect("Connection closed ($code${if (reason.isNotBlank()) ": $reason" else ""})")
@@ -149,7 +157,7 @@ class CaptureWebSocketClient(
                 if (httpCode == 401 || httpCode == 403) {
                     onConnectionState(
                         ConnectionCaptureStatus.Error,
-                        "Session ID or Ephemeral Ingest Token rejected (HTTP $httpCode). Generate a fresh session in LIVECAST STUDIO.",
+                        "Session ID or Ingest Token rejected (HTTP $httpCode).",
                     )
                     return
                 }
@@ -179,11 +187,21 @@ class CaptureWebSocketClient(
                 val frame = sendQueue.poll(100, TimeUnit.MILLISECONDS) ?: continue
                 val ws = activeWs
                 if (ws != null) {
-                    // Backpressure protection if OkHttp outbound buffer exceeds 4 MB
                     if (ws.queueSize() > 4 * 1024 * 1024 && !frame.isCritical) {
                         continue
                     }
-                    ws.send(frame.bytes.toByteString())
+                    if (ws.send(frame.bytes.toByteString())) {
+                        val total = totalFramesSent.incrementAndGet()
+                        val bytesWindow = windowBytesSent.addAndGet(frame.bytes.size.toLong())
+                        val now = System.currentTimeMillis()
+                        val elapsed = now - windowStartMs
+                        if (elapsed >= 1000L) {
+                            val kbps = ((bytesWindow * 8L) / elapsed).toInt()
+                            onThroughputMeasured?.invoke(total, kbps)
+                            windowBytesSent.set(0L)
+                            windowStartMs = now
+                        }
+                    }
                 }
             }
         }
@@ -208,7 +226,6 @@ class CaptureWebSocketClient(
             frameType == IngestProtocol.FRAME_AUDIO_CONFIG
 
         if (!sendQueue.offer(QueuedFrame(packet, isCritical))) {
-            // Drop oldest non-critical frame cleanly to make space
             sendQueue.poll()
             sendQueue.offer(QueuedFrame(packet, isCritical))
         }
@@ -250,7 +267,6 @@ class CaptureWebSocketClient(
             activeWs?.send(JSONObject().put("type", "stop").toString())
             activeWs?.close(1000, "Capture stopped by user")
         } catch (_: Exception) {
-            // ignore
         }
         activeWs = null
         onConnectionState(ConnectionCaptureStatus.Stopped, null)

@@ -1,13 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="studio_bg">#0B0E14</color>
-    <color name="studio_surface">#121721</color>
-    <color name="studio_surface_alt">#0E131B</color>
-    <color name="studio_border">#232B3A</color>
-    <color name="studio_text_primary">#F1F5F9</color>
+    <color name="studio_bg">#060913</color>
+    <color name="studio_navy">#0B1121</color>
+    <color name="studio_surface">#10182B</color>
+    <color name="studio_surface_alt">#0A101E</color>
+    <color name="studio_border">#22304D</color>
+    <color name="studio_text_primary">#F8FAFC</color>
     <color name="studio_text_muted">#94A3B8</color>
-    <color name="studio_blue">#2563EB</color>
-    <color name="studio_emerald">#059669</color>
-    <color name="studio_rose">#E11D48</color>
-    <color name="studio_amber">#D97706</color>
+
+    <color name="studio_blue">#3B82F6</color>
+    <color name="studio_electric_blue">#2563EB</color>
+    <color name="studio_purple">#8B5CF6</color>
+    <color name="studio_cyan">#06B6D4</color>
+    <color name="studio_magenta">#EC4899</color>
+    <color name="studio_teal">#14B8A6</color>
+    <color name="studio_orange">#F97316</color>
+    <color name="studio_emerald">#10B981</color>
+    <color name="studio_rose">#F43F5E</color>
+    <color name="studio_amber">#F59E0B</color>
 </resources>

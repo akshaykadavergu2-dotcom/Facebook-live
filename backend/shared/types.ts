@@ -8,7 +8,13 @@ export type ClockFormat = 'date-time' | 'time-24h' | 'time-12h';
 
 export type OverlayAnimation = 'static' | 'fade' | 'slide' | 'scroll';
 
+export type TextAlignment = 'left' | 'center' | 'right';
+
 export type VideoSourceType = 'uploaded' | 'direct-url' | 'android-capture' | 'youtube-preview';
+
+export type DestinationId = 'facebook' | 'youtube';
+
+export type DestinationMode = 'facebook' | 'youtube' | 'both';
 
 export type AndroidCaptureConnectionState =
   | 'Disconnected'
@@ -45,6 +51,7 @@ export interface AndroidCaptureSessionInfo {
   sessionId: string;
   ingestToken: string;
   wsIngestUrl: string;
+  wsWebIngestUrl?: string;
   deepLinkUrl: string;
   expiresAt: string;
 }
@@ -56,6 +63,8 @@ export interface OverlayConfig {
   logoPosition: LogoPosition;
   logoScale: number;
   logoOpacity: number;
+  logoX?: number | null;
+  logoY?: number | null;
 
   headlineEnabled: boolean;
   headlineText: string;
@@ -79,6 +88,8 @@ export interface OverlayConfig {
   lowerThirdBgColor: string;
   lowerThirdTextColor: string;
   lowerThirdAnimation: Exclude<OverlayAnimation, 'scroll'>;
+  lowerThirdX?: number | null;
+  lowerThirdY?: number | null;
 
   clockEnabled: boolean;
   clockPosition: LogoPosition;
@@ -87,6 +98,8 @@ export interface OverlayConfig {
   clockColor: string;
   clockBgColor: string;
   clockBgOpacity: number;
+  clockX?: number | null;
+  clockY?: number | null;
 
   tickerEnabled: boolean;
   tickerText: string;
@@ -95,6 +108,24 @@ export interface OverlayConfig {
   tickerBgColor: string;
   tickerBgOpacity: number;
   tickerSpeed: number;
+
+  customTextEnabled?: boolean;
+  customText?: string;
+  customTextFontSize?: number;
+  customTextColor?: string;
+  customTextBgColor?: string;
+  customTextBgOpacity?: number;
+  customTextAlign?: TextAlignment;
+  customTextX?: number;
+  customTextY?: number;
+
+  imageOverlayEnabled?: boolean;
+  imageOverlayPath?: string | null;
+  imageOverlayUrl?: string | null;
+  imageOverlayX?: number;
+  imageOverlayY?: number;
+  imageOverlayScale?: number;
+  imageOverlayOpacity?: number;
 }
 
 export interface VideoAsset {
@@ -122,6 +153,24 @@ export interface RtmpPublicConfig {
   updatedAt: string | null;
 }
 
+export interface DestinationsConfigResponse {
+  facebook: RtmpPublicConfig;
+  youtube: RtmpPublicConfig;
+}
+
+export interface DestinationStreamTelemetry {
+  id: DestinationId;
+  label: string;
+  connected: boolean;
+  status: StreamStatusState;
+  bitrateKbps: number;
+  fps: number;
+  outputResolution: string;
+  droppedFrames: number;
+  latencyMs: number;
+  lastError: string | null;
+}
+
 export interface StreamTelemetry {
   status: StreamStatusState;
   quality: StreamQualityProfile;
@@ -137,6 +186,11 @@ export interface StreamTelemetry {
   loopVideo: boolean;
   lastError: string | null;
   sessionId: string | null;
+  destinationMode?: DestinationMode;
+  destinations?: {
+    facebook: DestinationStreamTelemetry;
+    youtube: DestinationStreamTelemetry;
+  };
 }
 
 export interface StreamLogEntry {

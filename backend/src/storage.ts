@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type {
+  DestinationsConfigResponse,
   OverlayConfig,
   RtmpPublicConfig,
   StreamHistoryEntry,
@@ -19,12 +20,15 @@ export const VIDEOS_DIR = path.join(UPLOADS_DIR, 'videos');
 export const OVERLAYS_DIR = path.join(UPLOADS_DIR, 'overlays');
 const STATE_FILE = path.join(DATA_DIR, 'studio-state.json');
 
+interface PersistedRtmpEntry {
+  serverUrl: string;
+  encryptedStreamKey: EncryptedPayload | null;
+  updatedAt: string | null;
+}
+
 interface PersistedState {
-  rtmp: {
-    serverUrl: string;
-    encryptedStreamKey: EncryptedPayload | null;
-    updatedAt: string | null;
-  };
+  rtmp: PersistedRtmpEntry;
+  youtube: PersistedRtmpEntry;
   overlays: OverlayConfig;
   videos: VideoAsset[];
   history: StreamHistoryEntry[];
@@ -37,6 +41,8 @@ export const DEFAULT_OVERLAY_CONFIG: OverlayConfig = {
   logoPosition: 'top-right',
   logoScale: 12,
   logoOpacity: 0.92,
+  logoX: null,
+  logoY: null,
 
   headlineEnabled: false,
   headlineText: 'LIVE STUDIO BROADCAST',
@@ -60,6 +66,8 @@ export const DEFAULT_OVERLAY_CONFIG: OverlayConfig = {
   lowerThirdBgColor: '#0B0E14',
   lowerThirdTextColor: '#F8FAFC',
   lowerThirdAnimation: 'slide',
+  lowerThirdX: null,
+  lowerThirdY: null,
 
   clockEnabled: false,
   clockPosition: 'top-right',
@@ -68,6 +76,8 @@ export const DEFAULT_OVERLAY_CONFIG: OverlayConfig = {
   clockColor: '#F8FAFC',
   clockBgColor: '#0B0E14',
   clockBgOpacity: 0.85,
+  clockX: null,
+  clockY: null,
 
   tickerEnabled: false,
   tickerText: 'Welcome to the live broadcast. Stay tuned for updates and upcoming segments.',
@@ -76,11 +86,34 @@ export const DEFAULT_OVERLAY_CONFIG: OverlayConfig = {
   tickerBgColor: '#1E293B',
   tickerBgOpacity: 0.9,
   tickerSpeed: 95,
+
+  customTextEnabled: false,
+  customText: 'LIVE BROADCAST',
+  customTextFontSize: 24,
+  customTextColor: '#FFFFFF',
+  customTextBgColor: '#1E1B4B',
+  customTextBgOpacity: 0.78,
+  customTextAlign: 'center',
+  customTextX: 50,
+  customTextY: 16,
+
+  imageOverlayEnabled: false,
+  imageOverlayPath: null,
+  imageOverlayUrl: null,
+  imageOverlayX: 8,
+  imageOverlayY: 18,
+  imageOverlayScale: 18,
+  imageOverlayOpacity: 0.92,
 };
 
 const DEFAULT_STATE: PersistedState = {
   rtmp: {
     serverUrl: 'rtmps://live-api-s.facebook.com:443/rtmp/',
+    encryptedStreamKey: null,
+    updatedAt: null,
+  },
+  youtube: {
+    serverUrl: 'rtmps://a.rtmps.youtube.com:443/live2',
     encryptedStreamKey: null,
     updatedAt: null,
   },
@@ -112,6 +145,11 @@ function readState(): PersistedState {
         encryptedStreamKey: parsed.rtmp?.encryptedStreamKey ?? null,
         updatedAt: parsed.rtmp?.updatedAt ?? null,
       },
+      youtube: {
+        serverUrl: parsed.youtube?.serverUrl || DEFAULT_STATE.youtube.serverUrl,
+        encryptedStreamKey: parsed.youtube?.encryptedStreamKey ?? null,
+        updatedAt: parsed.youtube?.updatedAt ?? null,
+      },
       overlays: {
         ...DEFAULT_OVERLAY_CONFIG,
         ...(parsed.overlays ?? {}),
@@ -131,20 +169,22 @@ function writeState(state: PersistedState): void {
   fs.renameSync(tempPath, STATE_FILE);
 }
 
-export function getRtmpPublicConfig(): RtmpPublicConfig {
-  const state = readState();
-  const decrypted = decryptSecret(state.rtmp.encryptedStreamKey);
+function toPublicRtmp(entry: PersistedRtmpEntry): RtmpPublicConfig {
+  const decrypted = decryptSecret(entry.encryptedStreamKey);
   return {
-    serverUrl: state.rtmp.serverUrl,
+    serverUrl: entry.serverUrl,
     hasStreamKey: Boolean(decrypted && decrypted.length > 0),
     maskedStreamKey: maskStreamKey(decrypted),
-    updatedAt: state.rtmp.updatedAt,
+    updatedAt: entry.updatedAt,
   };
 }
 
+export function getRtmpPublicConfig(): RtmpPublicConfig {
+  return toPublicRtmp(readState().rtmp);
+}
+
 export function getDecryptedStreamKey(): string | null {
-  const state = readState();
-  return decryptSecret(state.rtmp.encryptedStreamKey);
+  return decryptSecret(readState().rtmp.encryptedStreamKey);
 }
 
 export function saveRtmpConfig(serverUrl: string, newStreamKey?: string | null): RtmpPublicConfig {
@@ -156,7 +196,7 @@ export function saveRtmpConfig(serverUrl: string, newStreamKey?: string | null):
   }
   state.rtmp.updatedAt = new Date().toISOString();
   writeState(state);
-  return getRtmpPublicConfig();
+  return toPublicRtmp(state.rtmp);
 }
 
 export function clearStreamKey(): RtmpPublicConfig {
@@ -164,15 +204,61 @@ export function clearStreamKey(): RtmpPublicConfig {
   state.rtmp.encryptedStreamKey = null;
   state.rtmp.updatedAt = new Date().toISOString();
   writeState(state);
-  return getRtmpPublicConfig();
+  return toPublicRtmp(state.rtmp);
+}
+
+export function getYoutubeRtmpPublicConfig(): RtmpPublicConfig {
+  return toPublicRtmp(readState().youtube);
+}
+
+export function getDecryptedYoutubeStreamKey(): string | null {
+  return decryptSecret(readState().youtube.encryptedStreamKey);
+}
+
+export function saveYoutubeRtmpConfig(serverUrl: string, newStreamKey?: string | null): RtmpPublicConfig {
+  const state = readState();
+  state.youtube.serverUrl = serverUrl.trim();
+  if (typeof newStreamKey === 'string') {
+    const trimmed = newStreamKey.trim();
+    state.youtube.encryptedStreamKey = trimmed.length > 0 ? encryptSecret(trimmed) : null;
+  }
+  state.youtube.updatedAt = new Date().toISOString();
+  writeState(state);
+  return toPublicRtmp(state.youtube);
+}
+
+export function clearYoutubeStreamKey(): RtmpPublicConfig {
+  const state = readState();
+  state.youtube.encryptedStreamKey = null;
+  state.youtube.updatedAt = new Date().toISOString();
+  writeState(state);
+  return toPublicRtmp(state.youtube);
+}
+
+export function getDestinationsPublicConfig(): DestinationsConfigResponse {
+  const state = readState();
+  return {
+    facebook: toPublicRtmp(state.rtmp),
+    youtube: toPublicRtmp(state.youtube),
+  };
 }
 
 export function getOverlayConfig(): OverlayConfig {
   const state = readState();
+  let dirty = false;
   if (state.overlays.logoPath && !fs.existsSync(state.overlays.logoPath)) {
     state.overlays.logoPath = null;
     state.overlays.logoUrl = null;
     state.overlays.logoEnabled = false;
+    dirty = true;
+  }
+  if (state.overlays.imageOverlayPath && !fs.existsSync(state.overlays.imageOverlayPath)) {
+    state.overlays.imageOverlayPath = null;
+    state.overlays.imageOverlayUrl = null;
+    state.overlays.imageOverlayEnabled = false;
+    dirty = true;
+  }
+  if (dirty) {
     writeState(state);
   }
   return state.overlays;

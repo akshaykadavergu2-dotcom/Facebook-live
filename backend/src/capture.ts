@@ -17,6 +17,7 @@ import {
   createFlvAvcSequenceTag,
   createFlvAvcVideoTag,
   createFlvHeader,
+  FlvStreamSplitter,
   FRAME_AUDIO_CONFIG,
   FRAME_AUDIO_DATA,
   FRAME_VIDEO_CONFIG,
@@ -30,6 +31,8 @@ interface InternalCaptureSession {
   ingestToken: string;
   expiresAtMs: number;
   ws: WebSocket | null;
+  ingestKind: 'android' | 'web' | null;
+  transcodeProc: ChildProcessWithoutNullStreams | null;
   telemetry: AndroidCaptureTelemetry;
   basePtsUs: bigint | null;
   videoConfig: Buffer | null;
@@ -86,6 +89,7 @@ class AndroidCaptureManager extends EventEmitter {
 
     const wsProto = httpProtocol === 'https' ? 'wss' : 'ws';
     const wsIngestUrl = `${wsProto}://${hostHeader}/ws/capture-ingest?sessionId=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(ingestToken)}`;
+    const wsWebIngestUrl = `${wsProto}://${hostHeader}/ws/web-ingest?sessionId=${encodeURIComponent(sessionId)}&token=${encodeURIComponent(ingestToken)}`;
     const backendHttpUrl = `${httpProtocol}://${hostHeader}`;
     const deepLinkUrl =
       `livecast://capture?backend=${encodeURIComponent(backendHttpUrl)}` +
@@ -98,6 +102,8 @@ class AndroidCaptureManager extends EventEmitter {
       ingestToken,
       expiresAtMs,
       ws: null,
+      ingestKind: null,
+      transcodeProc: null,
       telemetry: {
         sessionId,
         status: 'WaitingForApp',
@@ -142,6 +148,7 @@ class AndroidCaptureManager extends EventEmitter {
       sessionId,
       ingestToken,
       wsIngestUrl,
+      wsWebIngestUrl,
       deepLinkUrl,
       expiresAt: new Date(expiresAtMs).toISOString(),
     };
@@ -196,7 +203,9 @@ class AndroidCaptureManager extends EventEmitter {
       }
     }
 
+    this.cleanupTranscodeProc(session);
     session.ws = ws;
+    session.ingestKind = 'android';
     this.activeSessionId = sessionId;
     session.telemetry.status = 'Connecting';
     session.telemetry.lastHeartbeatAt = new Date().toISOString();
@@ -234,11 +243,230 @@ class AndroidCaptureManager extends EventEmitter {
           session.telemetry.videoStatus = 'IDLE';
           session.telemetry.fps = 0;
           session.telemetry.bitrateKbps = 0;
-          session.telemetry.lastError = 'Android capture disconnected and did not reconnect within 15s.';
+          session.telemetry.lastError = 'Live capture disconnected and did not reconnect within 15s.';
           this.emitTelemetry(session);
           this.closeAllConsumers(session);
         }
       }, RECONNECT_GRACE_MS);
+    });
+
+    ws.on('error', (err) => {
+      session.telemetry.lastError = err.message;
+      this.emitTelemetry(session);
+    });
+  }
+
+  public attachWebIngestSocket(sessionId: string, ws: WebSocket, mimeType = 'video/webm'): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      ws.close(4004, 'Session not found');
+      return;
+    }
+
+    if (session.reconnectTimer) {
+      clearTimeout(session.reconnectTimer);
+      session.reconnectTimer = null;
+    }
+
+    if (session.ws && session.ws !== ws && session.ws.readyState === WebSocket.OPEN) {
+      try {
+        session.ws.close(4001, 'Superseded by reconnect');
+      } catch {
+        // ignore
+      }
+    }
+
+    this.cleanupTranscodeProc(session);
+    session.ws = ws;
+    session.ingestKind = 'web';
+    session.basePtsUs = null;
+    session.videoConfig = null;
+    session.audioConfig = null;
+    session.lastKeyGopTags = [];
+    this.activeSessionId = sessionId;
+    session.telemetry.status = 'Connecting';
+    session.telemetry.permissionGranted = true;
+    session.telemetry.lastHeartbeatAt = new Date().toISOString();
+    session.telemetry.lastError = null;
+    this.emitTelemetry(session);
+
+    const isMp4Input = mimeType.toLowerCase().includes('mp4');
+    const ffmpegArgs = [
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-fflags',
+      '+nobuffer+discardcorrupt',
+      '-flags',
+      'low_delay',
+      '-analyzeduration',
+      '1500000',
+      '-probesize',
+      '1500000',
+      ...(isMp4Input ? [] : ['-f', 'webm']),
+      '-i',
+      'pipe:0',
+      '-map',
+      '0:v:0',
+      '-map',
+      '0:a:0?',
+      '-vf',
+      'scale=trunc(iw/2)*2:trunc(ih/2)*2',
+      '-c:v',
+      'libx264',
+      '-preset',
+      'ultrafast',
+      '-tune',
+      'zerolatency',
+      '-pix_fmt',
+      'yuv420p',
+      '-r',
+      '30',
+      '-g',
+      '60',
+      '-keyint_min',
+      '60',
+      '-b:v',
+      '2500k',
+      '-maxrate',
+      '3000k',
+      '-bufsize',
+      '3000k',
+      '-c:a',
+      'aac',
+      '-ar',
+      '44100',
+      '-ac',
+      '2',
+      '-b:a',
+      '128k',
+      '-f',
+      'flv',
+      'pipe:1',
+    ];
+
+    const proc = spawn('ffmpeg', ffmpegArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
+    session.transcodeProc = proc;
+    const stderrTail: string[] = [];
+
+    proc.stdin.on('error', () => {
+      // Ignore EPIPE when closing
+    });
+
+    const splitter = new FlvStreamSplitter({
+      onTag: (tag, info) => {
+        if (session.transcodeProc !== proc) return;
+        session.telemetry.lastHeartbeatAt = new Date().toISOString();
+
+        const dataSize = (tag[1] << 16) | (tag[2] << 8) | tag[3];
+        if (info.tagType === 0x09 && info.isSequenceHeader && dataSize > 5) {
+          const avcConfig = Buffer.from(tag.subarray(16, tag.length - 4));
+          if (avcConfig.length >= 7) {
+            session.videoConfig = avcConfig;
+            session.telemetry.status = 'Capturing';
+            session.telemetry.videoStatus = 'CAPTURING';
+            session.telemetry.permissionGranted = true;
+            this.emit(`videoConfig:${session.sessionId}`, avcConfig);
+            this.emitTelemetry(session);
+          }
+          return;
+        }
+
+        if (info.tagType === 0x08 && info.isSequenceHeader && dataSize > 2) {
+          const audioConfig = Buffer.from(tag.subarray(13, tag.length - 4));
+          if (audioConfig.length >= 2) {
+            session.audioConfig = audioConfig;
+            session.telemetry.audioStatus = 'AUDIO_CAPTURED';
+            if (session.telemetry.audioSampleRate === 0) {
+              session.telemetry.audioSampleRate = 44100;
+            }
+            this.emitTelemetry(session);
+          }
+          return;
+        }
+
+        if (info.isSequenceHeader || info.tagType === 0x12) {
+          return;
+        }
+
+        if (info.tagType === 0x09) {
+          if (info.isKeyframe) {
+            session.lastKeyGopTags = [tag];
+          } else if (session.lastKeyGopTags.length > 0 && session.lastKeyGopTags.length < 180) {
+            session.lastKeyGopTags.push(tag);
+          }
+          session.telemetry.framesReceived += 1;
+          session.telemetry.status = 'Capturing';
+          session.telemetry.videoStatus = 'CAPTURING';
+          session.telemetry.permissionGranted = true;
+          this.updateBitrateAndFps(session, tag.length, true);
+          this.broadcastFlvTag(session, tag, info.isKeyframe);
+          return;
+        }
+
+        if (info.tagType === 0x08) {
+          session.telemetry.audioStatus = 'AUDIO_CAPTURED';
+          this.updateBitrateAndFps(session, tag.length, false);
+          this.broadcastFlvTag(session, tag, false);
+        }
+      },
+    });
+
+    proc.stdout.on('data', (chunk: Buffer) => {
+      splitter.push(chunk);
+    });
+
+    proc.stderr.on('data', (chunk: Buffer) => {
+      const line = chunk.toString('utf8').trim();
+      if (line) {
+        stderrTail.push(line);
+        if (stderrTail.length > 8) stderrTail.shift();
+      }
+    });
+
+    proc.on('close', (code) => {
+      if (session.transcodeProc === proc) {
+        session.transcodeProc = null;
+      }
+      if (code && code !== 0 && session.ws === ws && session.telemetry.status !== 'Stopped') {
+        session.telemetry.lastError =
+          stderrTail.slice(-2).join(' | ') || `In-app capture transcoder exited with code ${code}.`;
+        session.telemetry.status = 'Error';
+        session.telemetry.videoStatus = 'ERROR';
+        this.emitTelemetry(session);
+      }
+    });
+
+    ws.on('message', (raw, isBinary) => {
+      if (!isBinary) {
+        this.handleControlMessage(session, raw.toString('utf8'));
+        return;
+      }
+      if (proc.stdin.writable && !proc.stdin.destroyed) {
+        const buf = Buffer.isBuffer(raw)
+          ? raw
+          : Array.isArray(raw)
+            ? Buffer.concat(raw)
+            : Buffer.from(raw as ArrayBuffer);
+        proc.stdin.write(buf);
+      }
+    });
+
+    ws.on('close', () => {
+      if (session.ws !== ws) return;
+      session.ws = null;
+      this.cleanupTranscodeProc(session);
+
+      if (session.telemetry.status === 'Stopped') {
+        return;
+      }
+
+      session.telemetry.status = 'Stopped';
+      session.telemetry.videoStatus = 'IDLE';
+      session.telemetry.fps = 0;
+      session.telemetry.bitrateKbps = 0;
+      this.closeAllConsumers(session);
+      this.emitTelemetry(session);
     });
 
     ws.on('error', (err) => {
@@ -548,6 +776,7 @@ class AndroidCaptureManager extends EventEmitter {
       }
     }
     session.ws = null;
+    this.cleanupTranscodeProc(session);
     this.closeAllConsumers(session);
     this.emitTelemetry(session);
     return { ...session.telemetry };
@@ -577,6 +806,26 @@ class AndroidCaptureManager extends EventEmitter {
     return false;
   }
 
+  private cleanupTranscodeProc(session: InternalCaptureSession): void {
+    const proc = session.transcodeProc;
+    if (!proc) return;
+    session.transcodeProc = null;
+    try {
+      if (proc.stdin.writable && !proc.stdin.destroyed) {
+        proc.stdin.end();
+      }
+    } catch {
+      // ignore
+    }
+    if (proc.exitCode === null) {
+      try {
+        proc.kill('SIGTERM');
+      } catch {
+        // ignore
+      }
+    }
+  }
+
   private closeAllConsumers(session: InternalCaptureSession): void {
     for (const c of session.consumers) {
       if (!c.destroyed) {
@@ -597,6 +846,7 @@ class AndroidCaptureManager extends EventEmitter {
         // ignore
       }
     }
+    this.cleanupTranscodeProc(session);
     this.closeAllConsumers(session);
     this.sessions.delete(sessionId);
   }

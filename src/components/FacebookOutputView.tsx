@@ -14,6 +14,8 @@ import {
 } from 'lucide-react';
 import type {
   AndroidCaptureTelemetry,
+  DestinationId,
+  DestinationMode,
   PipelineCheckResult,
   RtmpPublicConfig,
   StreamLogEntry,
@@ -29,6 +31,9 @@ interface FacebookOutputViewProps {
   telemetry: StreamTelemetry;
   logs: StreamLogEntry[];
   rtmpConfig: RtmpPublicConfig;
+  youtubeRtmpConfig: RtmpPublicConfig;
+  destinationMode: DestinationMode;
+  onChangeDestinationMode: (mode: DestinationMode) => void;
   sourceType: VideoSourceType | 'camera' | 'screen';
   selectedVideo: VideoAsset | null;
   directUrl: string;
@@ -38,6 +43,7 @@ interface FacebookOutputViewProps {
   loopVideo: boolean;
   onChangeLoopVideo: (loop: boolean) => void;
   onRtmpUpdated: (config: RtmpPublicConfig) => void;
+  onYoutubeRtmpUpdated: (config: RtmpPublicConfig) => void;
   onTelemetryUpdated: (telemetry: StreamTelemetry) => void;
   onNavigate: (section: NavSection) => void;
 }
@@ -46,6 +52,9 @@ export function FacebookOutputView({
   telemetry,
   logs,
   rtmpConfig,
+  youtubeRtmpConfig,
+  destinationMode,
+  onChangeDestinationMode,
   sourceType,
   selectedVideo,
   directUrl,
@@ -55,6 +64,7 @@ export function FacebookOutputView({
   loopVideo,
   onChangeLoopVideo,
   onRtmpUpdated,
+  onYoutubeRtmpUpdated,
   onTelemetryUpdated,
   onNavigate,
 }: FacebookOutputViewProps) {
@@ -62,9 +72,19 @@ export function FacebookOutputView({
   const [streamKey, setStreamKey] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [rtmpFeedback, setRtmpFeedback] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [rtmpFeedback, setRtmpFeedback] = useState<{ type: 'ok' | 'err'; text: string } | null>(
+    null,
+  );
 
-  const [streamBusyAction, setStreamBusyAction] = useState<'starting' | 'stopping' | null>(null);
+  const [ytServerUrl, setYtServerUrl] = useState(youtubeRtmpConfig.serverUrl);
+  const [ytStreamKey, setYtStreamKey] = useState('');
+  const [showYtKey, setShowYtKey] = useState(false);
+  const [savingYt, setSavingYt] = useState(false);
+  const [ytFeedback, setYtFeedback] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+
+  const [streamBusyAction, setStreamBusyAction] = useState<
+    'starting' | 'stopping' | DestinationId | null
+  >(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const [pipelineChecking, setPipelineChecking] = useState(false);
@@ -73,6 +93,10 @@ export function FacebookOutputView({
   useEffect(() => {
     setServerUrl(rtmpConfig.serverUrl);
   }, [rtmpConfig.serverUrl]);
+
+  useEffect(() => {
+    setYtServerUrl(youtubeRtmpConfig.serverUrl);
+  }, [youtubeRtmpConfig.serverUrl]);
 
   const isStreamingOrConnecting = telemetry.status === 'Live' || telemetry.status === 'Connecting';
   const isCaptureActive = Boolean(
@@ -88,8 +112,8 @@ export function FacebookOutputView({
   const sourceSummary =
     sourceType === 'android-capture'
       ? isCaptureActive && captureTelemetry
-        ? `Android Live Capture · ${captureTelemetry.width}x${captureTelemetry.height} @ ${captureTelemetry.fps} fps (${captureTelemetry.audioStatus === 'AUDIO_CAPTURED' ? 'Playback Audio' : 'Silent AAC Fallback'})`
-        : 'Android Live Capture Inactive (Start Capture in Android Capture tab first)'
+        ? `In-App Live Capture · ${captureTelemetry.width}x${captureTelemetry.height} @ ${captureTelemetry.fps} fps (${captureTelemetry.audioStatus === 'AUDIO_CAPTURED' ? 'Playback/Mic Audio' : 'Silent AAC Fallback'})`
+        : 'In-App Live Capture Inactive (Start Capture in Live Capture tab first)'
       : sourceType === 'uploaded'
         ? selectedVideo
           ? `Uploaded File · ${selectedVideo.originalName}`
@@ -101,6 +125,9 @@ export function FacebookOutputView({
           : sourceType === 'youtube-preview'
             ? 'YouTube Preview Only (Cannot start FFmpeg RTMP)'
             : 'Local Browser Capture Preview Only (Record & upload to broadcast)';
+
+  const fbDest = telemetry.destinations?.facebook;
+  const ytDest = telemetry.destinations?.youtube;
 
   const handleSaveCredentials = async () => {
     setSaving(true);
@@ -114,7 +141,7 @@ export function FacebookOutputView({
         type: 'ok',
         text: updated.hasStreamKey
           ? `Saved & AES-256-GCM encrypted on backend (${updated.maskedStreamKey}).`
-          : 'RTMP server URL updated. Add your Stream Key to broadcast.',
+          : 'Facebook RTMP server URL updated. Add your Stream Key to broadcast.',
       });
     } catch (err) {
       setRtmpFeedback({
@@ -132,14 +159,55 @@ export function FacebookOutputView({
     try {
       const updated = await api.clearRtmpKey();
       onRtmpUpdated(updated);
-      setRtmpFeedback({ type: 'ok', text: 'Stored Stream Key removed from backend.' });
+      setRtmpFeedback({ type: 'ok', text: 'Stored Facebook Stream Key removed from backend.' });
     } catch (err) {
       setRtmpFeedback({
         type: 'err',
-        text: err instanceof Error ? err.message : 'Failed to clear Stream Key.',
+        text: err instanceof Error ? err.message : 'Failed to clear Facebook Stream Key.',
       });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSaveYoutubeCredentials = async () => {
+    setSavingYt(true);
+    setYtFeedback(null);
+    try {
+      const updated = await api.saveYoutubeRtmpConfig(ytServerUrl, ytStreamKey || undefined);
+      onYoutubeRtmpUpdated(updated);
+      setYtStreamKey('');
+      setShowYtKey(false);
+      setYtFeedback({
+        type: 'ok',
+        text: updated.hasStreamKey
+          ? `Saved & AES-256-GCM encrypted on backend (${updated.maskedStreamKey}).`
+          : 'YouTube RTMP server URL updated. Add your Stream Key to broadcast.',
+      });
+    } catch (err) {
+      setYtFeedback({
+        type: 'err',
+        text: err instanceof Error ? err.message : 'Failed to save YouTube RTMP credentials.',
+      });
+    } finally {
+      setSavingYt(false);
+    }
+  };
+
+  const handleClearYoutubeKey = async () => {
+    setSavingYt(true);
+    setYtFeedback(null);
+    try {
+      const updated = await api.clearYoutubeRtmpKey();
+      onYoutubeRtmpUpdated(updated);
+      setYtFeedback({ type: 'ok', text: 'Stored YouTube Stream Key removed from backend.' });
+    } catch (err) {
+      setYtFeedback({
+        type: 'err',
+        text: err instanceof Error ? err.message : 'Failed to clear YouTube Stream Key.',
+      });
+    } finally {
+      setSavingYt(false);
     }
   };
 
@@ -150,8 +218,8 @@ export function FacebookOutputView({
     if (!isAuthorizedSource) {
       setActionError(
         sourceType === 'youtube-preview'
-          ? 'YouTube sources are preview-only and cannot be sent to FFmpeg. Choose an uploaded MP4/MOV/WebM file or authorized direct media URL.'
-          : 'Select an uploaded video file or authorized direct media URL in Live Studio first.',
+          ? 'YouTube sources are preview-only and cannot be sent to FFmpeg. Choose an uploaded MP4/MOV/WebM file, active In-App Live Capture, or authorized direct media URL.'
+          : 'Select an uploaded video file, active In-App Live Capture, or authorized direct media URL in Live Studio first.',
       );
       return;
     }
@@ -170,10 +238,11 @@ export function FacebookOutputView({
         directUrl: apiSource === 'direct-url' ? directUrl : undefined,
         quality,
         loopVideo,
+        destinationMode,
       });
       onTelemetryUpdated(res.telemetry);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Failed to start Facebook Live broadcast.');
+      setActionError(err instanceof Error ? err.message : 'Failed to start live broadcast.');
     } finally {
       setStreamBusyAction(null);
     }
@@ -192,11 +261,29 @@ export function FacebookOutputView({
     }
   };
 
+  const handleControlDestination = async (dest: DestinationId, action: 'start' | 'stop') => {
+    setActionError(null);
+    setStreamBusyAction(dest);
+    try {
+      const res =
+        action === 'start' ? await api.startDestination(dest) : await api.stopDestination(dest);
+      onTelemetryUpdated(res.telemetry);
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : `Failed to ${action} ${dest} destination.`,
+      );
+    } finally {
+      setStreamBusyAction(null);
+    }
+  };
+
   const handleValidatePipeline = async () => {
     setActionError(null);
     setPipelineResult(null);
     if (!isAuthorizedSource) {
-      setActionError('Select an uploaded video, active Android Live Capture, or authorized direct media URL first.');
+      setActionError(
+        'Select an uploaded video, active In-App Live Capture, or authorized direct media URL first.',
+      );
       return;
     }
     setPipelineChecking(true);
@@ -223,12 +310,14 @@ export function FacebookOutputView({
 
   return (
     <div className="space-y-5 max-w-6xl min-w-0">
-      {/* Live Output Telemetry & Primary Controls */}
+      {/* Live Output Telemetry & Primary Multi-Destination Controls */}
       <section className="bg-[#121721] border border-[#232B3A] rounded-2xl p-4 sm:p-5 space-y-4 min-w-0">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
             <Radio className="w-4 h-4 text-blue-400 shrink-0" />
-            <h2 className="text-base font-semibold text-slate-100">Facebook Live Output Control</h2>
+            <h2 className="text-base font-semibold text-slate-100">
+              Multi-Destination RTMP Broadcast Output
+            </h2>
           </div>
           <span
             className={`text-xs font-mono font-semibold shrink-0 ${
@@ -248,7 +337,9 @@ export function FacebookOutputView({
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2.5">
           <div className="bg-[#0E131B] border border-[#232B3A] rounded-xl px-3 py-2.5 min-w-0">
             <div className="text-[11px] text-slate-400">Connection</div>
-            <div className="text-sm font-semibold text-slate-100 mt-0.5 truncate">{telemetry.status}</div>
+            <div className="text-sm font-semibold text-slate-100 mt-0.5 truncate">
+              {telemetry.status}
+            </div>
           </div>
           <div className="bg-[#0E131B] border border-[#232B3A] rounded-xl px-3 py-2.5 min-w-0">
             <div className="text-[11px] text-slate-400">Duration</div>
@@ -306,6 +397,45 @@ export function FacebookOutputView({
             <span>Change Source</span>
             <ArrowRight className="w-3.5 h-3.5 text-blue-400" />
           </button>
+        </div>
+
+        {/* Destination Mode Selector */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-slate-300">
+              Broadcast Destination Mode (Single-Encode Fan-Out)
+            </span>
+            <span className="text-[11px] font-mono text-slate-400">
+              {destinationMode === 'both'
+                ? 'Simultaneous FB + YT'
+                : destinationMode === 'youtube'
+                  ? 'YouTube Live Only'
+                  : 'Facebook Live Only'}
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {(
+              [
+                { id: 'facebook', label: 'Facebook Live Only' },
+                { id: 'youtube', label: 'YouTube Live Only' },
+                { id: 'both', label: 'Both Simultaneously' },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                disabled={isStreamingOrConnecting}
+                onClick={() => onChangeDestinationMode(opt.id)}
+                className={`min-h-[44px] px-3 py-2 rounded-xl border text-xs font-semibold transition-colors disabled:opacity-50 ${
+                  destinationMode === opt.id
+                    ? 'bg-blue-600/20 border-blue-500 text-slate-100'
+                    : 'bg-[#0E131B] border-[#232B3A] text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {(actionError || telemetry.lastError) && (
@@ -367,6 +497,93 @@ export function FacebookOutputView({
           </div>
         </div>
 
+        {/* Independent Destination Status & Controls */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+          <div className="bg-[#0E131B] border border-[#232B3A] rounded-xl p-3.5 space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-blue-300">Facebook Live Output</span>
+              <span
+                className={`text-xs font-mono font-semibold ${
+                  fbDest?.status === 'Live'
+                    ? 'text-emerald-400'
+                    : fbDest?.status === 'Error'
+                      ? 'text-rose-400'
+                      : 'text-slate-400'
+                }`}
+              >
+                {fbDest?.status || 'Offline'}
+              </span>
+            </div>
+            <div className="text-[11px] font-mono text-slate-400">
+              {fbDest?.bitrateKbps || 0} kbps · {fbDest?.fps || 0} fps ·{' '}
+              {fbDest?.outputResolution || '1280x720'} · Dropped: {fbDest?.droppedFrames || 0}
+            </div>
+            {fbDest?.lastError && (
+              <div className="text-[11px] text-rose-300 break-words">{fbDest.lastError}</div>
+            )}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                disabled={!isStreamingOrConnecting || fbDest?.connected || streamBusyAction !== null}
+                onClick={() => handleControlDestination('facebook', 'start')}
+                className="min-h-[38px] px-3 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-xs font-semibold text-blue-200 disabled:opacity-40"
+              >
+                Connect FB
+              </button>
+              <button
+                type="button"
+                disabled={!fbDest?.connected || streamBusyAction !== null}
+                onClick={() => handleControlDestination('facebook', 'stop')}
+                className="min-h-[38px] px-3 py-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/40 text-xs font-semibold text-rose-200 disabled:opacity-40"
+              >
+                Disconnect FB
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-[#0E131B] border border-[#232B3A] rounded-xl p-3.5 space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-semibold text-rose-300">YouTube Live Output</span>
+              <span
+                className={`text-xs font-mono font-semibold ${
+                  ytDest?.status === 'Live'
+                    ? 'text-emerald-400'
+                    : ytDest?.status === 'Error'
+                      ? 'text-rose-400'
+                      : 'text-slate-400'
+                }`}
+              >
+                {ytDest?.status || 'Offline'}
+              </span>
+            </div>
+            <div className="text-[11px] font-mono text-slate-400">
+              {ytDest?.bitrateKbps || 0} kbps · {ytDest?.fps || 0} fps ·{' '}
+              {ytDest?.outputResolution || '1280x720'} · Dropped: {ytDest?.droppedFrames || 0}
+            </div>
+            {ytDest?.lastError && (
+              <div className="text-[11px] text-rose-300 break-words">{ytDest.lastError}</div>
+            )}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                disabled={!isStreamingOrConnecting || ytDest?.connected || streamBusyAction !== null}
+                onClick={() => handleControlDestination('youtube', 'start')}
+                className="min-h-[38px] px-3 py-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/40 text-xs font-semibold text-rose-200 disabled:opacity-40"
+              >
+                Connect YT
+              </button>
+              <button
+                type="button"
+                disabled={!ytDest?.connected || streamBusyAction !== null}
+                onClick={() => handleControlDestination('youtube', 'stop')}
+                className="min-h-[38px] px-3 py-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/40 text-xs font-semibold text-rose-200 disabled:opacity-40"
+              >
+                Disconnect YT
+              </button>
+            </div>
+          </div>
+        </div>
+
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
           {sourceType === 'uploaded' ? (
             <label className="min-h-[44px] flex items-center gap-2.5 text-xs text-slate-300 cursor-pointer">
@@ -391,7 +608,9 @@ export function FacebookOutputView({
           >
             <Wrench className="w-3.5 h-3.5 text-blue-400 shrink-0" />
             <span>
-              {pipelineChecking ? 'Testing 2s FFmpeg Encode...' : 'Verify Encoding Pipeline (Dry-Run)'}
+              {pipelineChecking
+                ? 'Testing 2s FFmpeg Encode...'
+                : 'Verify Encoding Pipeline (Dry-Run)'}
             </span>
           </button>
         </div>
@@ -415,9 +634,10 @@ export function FacebookOutputView({
         )}
       </section>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start min-w-0">
+      {/* Facebook & YouTube RTMP Credential Cards */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start min-w-0">
         {/* Facebook RTMP Credentials */}
-        <section className="lg:col-span-5 bg-[#121721] border border-[#232B3A] rounded-2xl p-4 sm:p-5 space-y-4 min-w-0">
+        <section className="bg-[#121721] border border-[#232B3A] rounded-2xl p-4 sm:p-5 space-y-4 min-w-0">
           <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-[#232B3A]">
             <div className="flex items-center gap-2">
               <KeyRound className="w-4 h-4 text-blue-400 shrink-0" />
@@ -433,7 +653,7 @@ export function FacebookOutputView({
           <div className="space-y-3">
             <div>
               <label htmlFor="fb-out-url" className="block text-xs font-medium text-slate-300 mb-1.5">
-                RTMP Server URL
+                Facebook RTMP Server URL
               </label>
               <input
                 id="fb-out-url"
@@ -473,7 +693,7 @@ export function FacebookOutputView({
                 </button>
               </div>
               <p className="text-[11px] text-slate-500 mt-1.5 leading-relaxed">
-                Encrypted on the Render backend with AES-256-GCM. Never stored in localStorage or exposed in frontend responses.
+                Encrypted on the Render backend with AES-256-GCM. Never stored in localStorage.
               </p>
             </div>
 
@@ -501,7 +721,7 @@ export function FacebookOutputView({
                 disabled={saving}
                 className="flex-1 min-h-[44px] px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold disabled:opacity-50"
               >
-                {saving ? 'Encrypting & Saving...' : 'Save Configuration'}
+                {saving ? 'Encrypting & Saving...' : 'Save Facebook Key'}
               </button>
               {rtmpConfig.hasStreamKey && (
                 <button
@@ -518,57 +738,161 @@ export function FacebookOutputView({
           </div>
         </section>
 
-        {/* FFmpeg Output Logs */}
-        <section className="lg:col-span-7 bg-[#121721] border border-[#232B3A] rounded-2xl p-4 sm:p-5 space-y-3 min-w-0">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-sm sm:text-base font-semibold text-slate-100">
-              FFmpeg &amp; RTMPS Engine Logs
-            </h3>
-            <span className="text-xs font-mono text-slate-400 tabular-nums">
-              {logs.length} events · Stream key redacted
+        {/* YouTube Live RTMP Credentials */}
+        <section className="bg-[#121721] border border-[#232B3A] rounded-2xl p-4 sm:p-5 space-y-4 min-w-0">
+          <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-[#232B3A]">
+            <div className="flex items-center gap-2">
+              <KeyRound className="w-4 h-4 text-rose-400 shrink-0" />
+              <h3 className="text-sm sm:text-base font-semibold text-slate-100">
+                YouTube Live RTMP Configuration
+              </h3>
+            </div>
+            <span className="text-xs font-mono text-slate-300">
+              {youtubeRtmpConfig.hasStreamKey
+                ? youtubeRtmpConfig.maskedStreamKey
+                : 'No Key Saved'}
             </span>
           </div>
-          <div className="bg-[#080A0F] border border-[#232B3A] rounded-xl p-3 h-64 sm:h-72 overflow-y-auto overflow-x-hidden font-mono text-xs space-y-1.5">
-            {logs.length === 0 ? (
-              <div className="text-slate-500 py-8 text-center">
-                No FFmpeg events yet. Run a dry-run check or start a live broadcast.
+
+          <div className="space-y-3">
+            <div>
+              <label htmlFor="yt-out-url" className="block text-xs font-medium text-slate-300 mb-1.5">
+                YouTube RTMP Server URL
+              </label>
+              <input
+                id="yt-out-url"
+                type="text"
+                value={ytServerUrl}
+                onChange={(e) => setYtServerUrl(e.target.value)}
+                placeholder="rtmps://a.rtmps.youtube.com:443/live2"
+                className="w-full min-h-[44px] bg-[#0B0E14] border border-[#263042] rounded-xl px-3 py-2 text-xs font-mono text-slate-100 focus:outline-none focus:border-blue-500"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="yt-out-key" className="block text-xs font-medium text-slate-300 mb-1.5">
+                YouTube Live Stream Key
+              </label>
+              <div className="relative">
+                <input
+                  id="yt-out-key"
+                  type={showYtKey ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  value={ytStreamKey}
+                  onChange={(e) => setYtStreamKey(e.target.value)}
+                  placeholder={
+                    youtubeRtmpConfig.hasStreamKey
+                      ? `Stored: ${youtubeRtmpConfig.maskedStreamKey} (enter to replace)`
+                      : 'Paste YouTube Live Stream Key'
+                  }
+                  className="w-full min-h-[44px] bg-[#0B0E14] border border-[#263042] rounded-xl pl-3 pr-12 py-2 text-xs font-mono text-slate-100 focus:outline-none focus:border-blue-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowYtKey((v) => !v)}
+                  aria-label={showYtKey ? 'Hide YouTube stream key' : 'Show YouTube stream key'}
+                  className="absolute right-1 top-1/2 -translate-y-1/2 min-h-[40px] min-w-[40px] flex items-center justify-center text-slate-400 hover:text-slate-200"
+                >
+                  {showYtKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
               </div>
-            ) : (
-              logs.map((entry) => (
-                <div key={entry.id} className="flex items-start gap-2 leading-relaxed">
-                  <span className="text-slate-500 shrink-0 tabular-nums">
-                    {new Date(entry.timestamp).toLocaleTimeString()}
-                  </span>
-                  <span
-                    className={`shrink-0 uppercase text-[10px] font-semibold mt-0.5 ${
-                      entry.level === 'error'
-                        ? 'text-rose-400'
-                        : entry.level === 'warn'
-                          ? 'text-amber-400'
-                          : entry.level === 'info'
-                            ? 'text-blue-400'
-                            : 'text-slate-400'
-                    }`}
-                  >
-                    [{entry.level}]
-                  </span>
-                  <span
-                    className={`break-all min-w-0 ${
-                      entry.level === 'error'
-                        ? 'text-rose-200'
-                        : entry.level === 'warn'
-                          ? 'text-amber-200'
-                          : 'text-slate-300'
-                    }`}
-                  >
-                    {entry.message}
-                  </span>
-                </div>
-              ))
+              <p className="text-[11px] text-slate-500 mt-1.5 leading-relaxed">
+                Encrypted on the Render backend with AES-256-GCM. Redacted from all logs.
+              </p>
+            </div>
+
+            {ytFeedback && (
+              <div
+                className={`p-3 rounded-xl border text-xs flex items-start gap-2 break-words ${
+                  ytFeedback.type === 'ok'
+                    ? 'bg-emerald-950/25 border-emerald-500/35 text-emerald-200'
+                    : 'bg-rose-950/25 border-rose-500/35 text-rose-200'
+                }`}
+              >
+                {ytFeedback.type === 'ok' ? (
+                  <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                )}
+                <span>{ytFeedback.text}</span>
+              </div>
             )}
+
+            <div className="flex flex-wrap gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={handleSaveYoutubeCredentials}
+                disabled={savingYt}
+                className="flex-1 min-h-[44px] px-4 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold disabled:opacity-50"
+              >
+                {savingYt ? 'Encrypting & Saving...' : 'Save YouTube Key'}
+              </button>
+              {youtubeRtmpConfig.hasStreamKey && (
+                <button
+                  type="button"
+                  onClick={handleClearYoutubeKey}
+                  disabled={savingYt}
+                  className="min-h-[44px] px-3.5 py-2 rounded-xl border border-[#2C374C] text-xs font-medium text-rose-300 hover:bg-rose-950/30 flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Clear Key</span>
+                </button>
+              )}
+            </div>
           </div>
         </section>
       </div>
+
+      {/* FFmpeg Output Logs */}
+      <section className="bg-[#121721] border border-[#232B3A] rounded-2xl p-4 sm:p-5 space-y-3 min-w-0">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm sm:text-base font-semibold text-slate-100">
+            FFmpeg &amp; Multi-Destination RTMPS Engine Logs
+          </h3>
+          <span className="text-xs font-mono text-slate-400 tabular-nums">
+            {logs.length} events · Stream keys redacted
+          </span>
+        </div>
+        <div className="bg-[#080A0F] border border-[#232B3A] rounded-xl p-3 h-64 sm:h-72 overflow-y-auto overflow-x-hidden font-mono text-xs space-y-1.5">
+          {logs.length === 0 ? (
+            <div className="text-slate-500 py-8 text-center">
+              No FFmpeg events yet. Run a dry-run check or start a live broadcast.
+            </div>
+          ) : (
+            logs.map((entry) => (
+              <div key={entry.id} className="flex items-start gap-2 leading-relaxed">
+                <span className="text-slate-500 shrink-0 tabular-nums">
+                  {new Date(entry.timestamp).toLocaleTimeString()}
+                </span>
+                <span
+                  className={`shrink-0 uppercase text-[10px] font-semibold mt-0.5 ${
+                    entry.level === 'error'
+                      ? 'text-rose-400'
+                      : entry.level === 'warn'
+                        ? 'text-amber-400'
+                        : entry.level === 'info'
+                          ? 'text-blue-400'
+                          : 'text-slate-400'
+                  }`}
+                >
+                  [{entry.level}]
+                </span>
+                <span
+                  className={`break-all min-w-0 ${
+                    entry.level === 'error'
+                      ? 'text-rose-200'
+                      : entry.level === 'warn'
+                        ? 'text-amber-200'
+                        : 'text-slate-300'
+                  }`}
+                >
+                  {entry.message}
+                </span>
+              </div>
+            ))
+          )}
+        </div>
+      </section>
     </div>
   );
 }

@@ -1,16 +1,11 @@
 package com.livecast.capture
 
-import android.annotation.SuppressLint
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
-import android.webkit.WebChromeClient
-import android.webkit.WebResourceRequest
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -18,140 +13,134 @@ import com.livecast.capture.databinding.ActivityMonitorACaptureBinding
 import kotlinx.coroutines.launch
 
 /**
- * Dedicated distraction-free Monitor A capture surface.
- * Because standard Android MediaProjection captures a full display task window and cannot
- * isolate an individual HTML element inside Chrome, MonitorACaptureActivity renders ONLY the
- * official YouTube IFrame Player API stage with zero browser URL bar or studio UI chrome.
+ * Dedicated Monitor A capture stage.
+ * Renders the YouTube preview via YouTubePlayerHelper (preventing Error 152-4/153)
+ * with clean Play/Pause, Mute/Unmute, Reload, Open in YouTube, and Stop Capture controls,
+ * and zero studio dashboard chrome or browser URL bar.
  */
 class MonitorACaptureActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_YOUTUBE_URL = "extra_youtube_url"
+        const val EXTRA_PREVIEW_ONLY = "extra_preview_only"
     }
 
     private lateinit var binding: ActivityMonitorACaptureBinding
+    private lateinit var playerHelper: YouTubePlayerHelper
+    private var isPlaying = true
+    private var isMuted = false
+    private var isPreviewOnly = false
 
-    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMonitorACaptureBinding.inflate(layoutInflater)
         setContentView(binding.root)
         enterImmersiveFullscreen()
 
+        isPreviewOnly = intent.getBooleanExtra(EXTRA_PREVIEW_ONLY, false)
+        if (isPreviewOnly) {
+            binding.btnMonitorStopCapture.text = "Exit Fullscreen"
+        }
+
         var sawActiveOrConnecting = false
         lifecycleScope.launch {
             CaptureForegroundService.uiState.collect { state ->
-                if (state.connectionStatus != ConnectionCaptureStatus.Stopped) {
-                    sawActiveOrConnecting = true
-                } else if (sawActiveOrConnecting && !isFinishing) {
-                    finish()
+                if (!isPreviewOnly) {
+                    if (state.connectionStatus != ConnectionCaptureStatus.Stopped) {
+                        sawActiveOrConnecting = true
+                    } else if (sawActiveOrConnecting && !isFinishing) {
+                        finish()
+                    }
                 }
             }
         }
 
+        playerHelper = YouTubePlayerHelper(
+            binding.monitorAWebView,
+            object : YouTubePlayerHelper.Listener {
+                override fun onPlayerStateChanged(statusText: String, playing: Boolean) {
+                    isPlaying = playing
+                    binding.tvMonitorAState.text = statusText
+                    binding.btnMonitorPlayPause.text = if (playing) "Pause" else "Play"
+                }
+
+                override fun onPlayerError(code: Int, readableMessage: String) {
+                    binding.monitorAErrorBanner.visibility = View.VISIBLE
+                    binding.tvMonitorAError.text = readableMessage
+                }
+
+                override fun onMutedChanged(muted: Boolean) {
+                    isMuted = muted
+                    binding.btnMonitorMute.text = if (muted) "Unmute" else "Mute"
+                }
+            },
+        )
+        playerHelper.configure()
+
         val youtubeUrl = intent.getStringExtra(EXTRA_YOUTUBE_URL).orEmpty()
         val videoId = IngestProtocol.extractYouTubeVideoId(youtubeUrl)
-
-        val webView = binding.monitorAWebView
-        webView.settings.apply {
-            javaScriptEnabled = true
-            domStorageEnabled = true
-            mediaPlaybackRequiresUserGesture = false
-            useWideViewPort = true
-            loadWithOverviewMode = true
-            mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+        if (videoId != null) {
+            binding.monitorAErrorBanner.visibility = View.GONE
+            playerHelper.loadVideo(videoId, autoplay = true)
+        } else {
+            playerHelper.loadStandby(
+                "MONITOR A · YOUTUBE CAPTURE STAGE",
+                "Paste a valid YouTube Live, watch, or youtu.be URL in LIVECAST STUDIO before starting capture.",
+            )
         }
-        webView.webChromeClient = WebChromeClient()
-        webView.webViewClient = object : WebViewClient() {
-            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                val url = request?.url?.toString().orEmpty()
-                return !(url.startsWith("https://www.youtube.com") ||
-                    url.startsWith("https://www.youtube-nocookie.com") ||
-                    url.startsWith("https://youtu.be"))
+
+        binding.btnMonitorClearError.setOnClickListener {
+            binding.monitorAErrorBanner.visibility = View.GONE
+        }
+
+        binding.btnMonitorPlayPause.setOnClickListener {
+            if (isPlaying) playerHelper.pause() else playerHelper.play()
+        }
+
+        binding.btnMonitorMute.setOnClickListener {
+            playerHelper.toggleMute()
+        }
+
+        binding.btnMonitorReload.setOnClickListener {
+            binding.monitorAErrorBanner.visibility = View.GONE
+            playerHelper.reload(autoplay = true)
+        }
+
+        binding.btnMonitorOpenYt.setOnClickListener {
+            val watchUrl = playerHelper.getCurrentWatchUrl()
+                ?: youtubeUrl.ifBlank { "https://www.youtube.com" }
+            try {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(watchUrl)))
+            } catch (_: Exception) {
             }
         }
 
-        if (videoId != null) {
-            val html = buildYouTubeStageHtml(videoId)
-            webView.loadDataWithBaseURL(
-                "https://www.youtube.com",
-                html,
-                "text/html",
-                "utf-8",
-                null,
-            )
-        } else {
-            val standbyHtml = """
-                <!DOCTYPE html>
-                <html>
-                <body style="margin:0;background:#000;color:#94a3b8;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center;">
-                  <div>
-                    <div style="font-size:18px;font-weight:700;color:#f1f5f9;">MONITOR A · YOUTUBE CAPTURE STAGE</div>
-                    <div style="font-size:13px;margin-top:8px;">Enter a valid YouTube Live or Video URL in Livecast Capture before starting.</div>
-                  </div>
-                </body>
-                </html>
-            """.trimIndent()
-            webView.loadDataWithBaseURL(null, standbyHtml, "text/html", "utf-8", null)
+        binding.btnMonitorStopCapture.setOnClickListener {
+            if (isPreviewOnly) {
+                finish()
+            } else {
+                stopCaptureAndFinish()
+            }
         }
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                startService(
-                    Intent(this@MonitorACaptureActivity, CaptureForegroundService::class.java).apply {
-                        action = CaptureForegroundService.ACTION_STOP_CAPTURE
-                    },
-                )
-                finish()
+                if (isPreviewOnly) {
+                    finish()
+                } else {
+                    stopCaptureAndFinish()
+                }
             }
         })
     }
 
-    private fun buildYouTubeStageHtml(videoId: String): String {
-        val safeId = videoId.replace(Regex("[^A-Za-z0-9_-]"), "")
-        return """
-            <!DOCTYPE html>
-            <html>
-            <head>
-              <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-              <style>
-                html, body {
-                  margin: 0;
-                  padding: 0;
-                  width: 100%;
-                  height: 100%;
-                  background: #000000;
-                  overflow: hidden;
-                  display: flex;
-                  align-items: center;
-                  justify-content: center;
-                }
-                #stage {
-                  width: 100vw;
-                  height: 56.25vw;
-                  max-height: 100vh;
-                  max-width: 177.78vh;
-                  background: #000000;
-                }
-                iframe {
-                  width: 100%;
-                  height: 100%;
-                  border: 0;
-                }
-              </style>
-            </head>
-            <body>
-              <div id="stage">
-                <iframe
-                  id="ytplayer"
-                  src="https://www.youtube.com/embed/$safeId?autoplay=1&playsinline=1&rel=0&modestbranding=1&enablejsapi=1"
-                  allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
-                  allowfullscreen>
-                </iframe>
-              </div>
-            </body>
-            </html>
-        """.trimIndent()
+    private fun stopCaptureAndFinish() {
+        startService(
+            Intent(this, CaptureForegroundService::class.java).apply {
+                action = CaptureForegroundService.ACTION_STOP_CAPTURE
+            },
+        )
+        finish()
     }
 
     private fun enterImmersiveFullscreen() {
@@ -175,10 +164,7 @@ class MonitorACaptureActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        binding.monitorAWebView.apply {
-            loadUrl("about:blank")
-            destroy()
-        }
+        playerHelper.destroy()
         super.onDestroy()
     }
 }

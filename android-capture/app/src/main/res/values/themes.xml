@@ -3,8 +3,17 @@
     <style name="Theme.LivecastCapture" parent="Theme.Material3.Dark.NoActionBar">
         <item name="android:windowBackground">@color/studio_bg</item>
         <item name="colorPrimary">@color/studio_blue</item>
-        <item name="android:statusBarColor">@color/studio_surface</item>
+        <item name="colorSecondary">@color/studio_purple</item>
+        <item name="colorTertiary">@color/studio_cyan</item>
+        <item name="android:statusBarColor">@color/studio_navy</item>
         <item name="android:navigationBarColor">@color/studio_bg</item>
+    </style>
+
+    <style name="Theme.LivecastSplash" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="android:windowBackground">#04060E</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:statusBarColor">#04060E</item>
+        <item name="android:navigationBarColor">#04060E</item>
     </style>
 
     <style name="Theme.LivecastMonitorStage" parent="Theme.Material3.Dark.NoActionBar">

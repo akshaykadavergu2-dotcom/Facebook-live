@@ -120,8 +120,10 @@ export function requireControlAccess(req: Request, res: Response, next: NextFunc
 
   const origin = req.headers.origin;
   const clientHeader = req.headers['x-livecast-client'];
-  const hasClientHeader =
-    typeof clientHeader === 'string' && clientHeader.trim() === 'livecast-web';
+  const trimmedClient = typeof clientHeader === 'string' ? clientHeader.trim() : '';
+  const hasWebClientHeader = trimmedClient === 'livecast-web';
+  const hasAndroidClientHeader = trimmedClient === 'livecast-android';
+  const hasClientHeader = hasWebClientHeader || hasAndroidClientHeader;
 
   if (origin) {
     if (!isOriginAllowed(origin, req.headers.host, req.headers['x-forwarded-host'])) {
@@ -153,6 +155,11 @@ export function requireControlAccess(req: Request, res: Response, next: NextFunc
     return;
   }
 
+  if (hasAndroidClientHeader && !secFetchSite) {
+    next();
+    return;
+  }
+
   const refererOrigin = extractRefererOrigin(req.headers.referer);
   if (
     refererOrigin &&
@@ -169,6 +176,6 @@ export function requireControlAccess(req: Request, res: Response, next: NextFunc
   }
 
   res.status(403).json({
-    error: 'Direct unverified control requests are blocked in production. Use the authorized studio frontend.',
+    error: 'Direct unverified control requests are blocked in production. Use the authorized studio frontend or LIVECAST STUDIO Android app.',
   });
 }

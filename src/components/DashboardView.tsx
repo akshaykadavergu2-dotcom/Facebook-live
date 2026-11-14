@@ -9,7 +9,6 @@ import type {
   VideoAsset,
 } from '../../shared/types';
 import { formatBytes, formatDuration } from '../lib/api';
-import { AndroidApkDownloadCard } from './AndroidApkDownloadCard';
 import type { NavSection } from './Sidebar';
 
 interface DashboardViewProps {
@@ -106,6 +105,13 @@ export function DashboardView({
           </button>
           <button
             type="button"
+            onClick={() => onNavigate('android-capture')}
+            className="min-h-[44px] px-4 py-2 text-sm font-medium rounded-xl border border-[#2A3447] bg-[#181F2C] text-slate-200 hover:bg-[#1E2738] transition-colors whitespace-nowrap"
+          >
+            In-App Live Capture
+          </button>
+          <button
+            type="button"
             onClick={() => onNavigate('studio')}
             className="min-h-[44px] px-4 py-2 text-sm font-semibold rounded-xl bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center gap-2 transition-colors whitespace-nowrap"
           >
@@ -122,8 +128,6 @@ export function DashboardView({
           <span>{sampleError}</span>
         </div>
       )}
-
-      <AndroidApkDownloadCard />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 min-w-0">
         <div className="bg-[#121721] border border-[#232B3A] rounded-lg p-5 min-w-0">

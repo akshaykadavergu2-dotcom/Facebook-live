@@ -3,8 +3,12 @@ import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
+import { PassThrough } from 'node:stream';
 import { promisify } from 'node:util';
 import type {
+  DestinationId,
+  DestinationMode,
+  DestinationStreamTelemetry,
   OverlayConfig,
   PipelineCheckResult,
   StreamHistoryEntry,
@@ -15,6 +19,7 @@ import type {
   VideoSourceType,
 } from '../shared/types.ts';
 import { redactSensitive } from './crypto.ts';
+import { FlvStreamSplitter } from './flvMuxer.ts';
 import { addStreamHistoryEntry, DATA_DIR } from './storage.ts';
 
 const execFileAsync = promisify(execFile);
@@ -172,26 +177,45 @@ export async function generateSampleVideo(outputPath: string): Promise<void> {
   );
 }
 
-export function validateRtmpUrl(rawUrl: string): { valid: boolean; normalized?: string; error?: string } {
+export function validateRtmpUrl(
+  rawUrl: string,
+  platformLabel = 'RTMP',
+): { valid: boolean; normalized?: string; error?: string } {
   const trimmed = rawUrl.trim();
   if (!trimmed) {
-    return { valid: false, error: 'RTMP Server URL is required.' };
+    return { valid: false, error: `${platformLabel} Server URL is required.` };
   }
   if (/[\s\r\n\0]/.test(trimmed)) {
-    return { valid: false, error: 'RTMP Server URL must not contain whitespace or control characters.' };
+    return {
+      valid: false,
+      error: `${platformLabel} Server URL must not contain whitespace or control characters.`,
+    };
+  }
+  if (/^https?:\/\/(www\.)?(youtube\.com|youtu\.be|m\.youtube\.com)/i.test(trimmed)) {
+    return {
+      valid: false,
+      error:
+        'A YouTube watch/share URL cannot be used as an RTMP ingest server. Enter your YouTube RTMP URL (e.g., rtmps://a.rtmps.youtube.com:443/live2).',
+    };
   }
   if (!/^rtmps?:\/\//i.test(trimmed)) {
-    return { valid: false, error: 'RTMP Server URL must begin with rtmp:// or rtmps://.' };
+    return { valid: false, error: `${platformLabel} Server URL must begin with rtmp:// or rtmps://.` };
   }
   try {
     const httpEquivalent = trimmed.replace(/^rtmps?:\/\//i, 'https://');
     const parsed = new URL(httpEquivalent);
     if (!parsed.hostname || parsed.hostname.length < 3) {
-      return { valid: false, error: 'RTMP Server URL must include a valid hostname.' };
+      return { valid: false, error: `${platformLabel} Server URL must include a valid hostname.` };
+    }
+    if (isPrivateOrLoopbackHost(parsed.hostname)) {
+      return {
+        valid: false,
+        error: 'Private network or loopback RTMP destinations are blocked for security.',
+      };
     }
     return { valid: true, normalized: trimmed };
   } catch {
-    return { valid: false, error: 'Invalid RTMP Server URL format.' };
+    return { valid: false, error: `Invalid ${platformLabel} Server URL format.` };
   }
 }
 
@@ -256,7 +280,7 @@ export function validateDirectMediaUrl(rawUrl: string): {
     return {
       valid: false,
       error:
-        'YouTube share links cannot be streamed via FFmpeg RTMP. Use the YouTube Preview monitor for preview, or select an authorized MP4/HLS/RTMP/SRT feed.',
+        'YouTube share links cannot be streamed via FFmpeg RTMP. Use Monitor A Preview + Android Capture, or select an authorized MP4/HLS/RTMP/SRT feed.',
     };
   }
   if (isPrivateOrLoopbackHost(parsed.hostname)) {
@@ -294,14 +318,21 @@ function sanitizeHexColor(hex: string, fallback = '0xFFFFFF'): string {
   return fallback;
 }
 
+function clampPercent(val: number | null | undefined, fallback: number): number {
+  if (typeof val !== 'number' || !Number.isFinite(val)) return fallback;
+  return Math.min(95, Math.max(2, val));
+}
+
 export function buildFilterGraph(
   width: number,
   height: number,
   overlays: OverlayConfig,
   hasLogoInput: boolean,
+  hasImageOverlayInput = false,
 ): string {
   const filters: string[] = [];
   let currentLabel = 'vbase';
+  let nextInputIdx = 1;
 
   filters.push(
     `[0:v]fps=30,scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p[${currentLabel}]`,
@@ -322,28 +353,52 @@ export function buildFilterGraph(
   if (hasLogoInput) {
     const logoWidth = Math.max(48, Math.round(width * (Math.min(35, Math.max(5, overlays.logoScale)) / 100)));
     const opacity = Math.min(1, Math.max(0.1, overlays.logoOpacity)).toFixed(2);
-    filters.push(`[1:v]scale=${logoWidth}:-1,format=rgba,colorchannelmixer=aa=${opacity}[logo_img]`);
+    filters.push(`[${nextInputIdx}:v]scale=${logoWidth}:-1,format=rgba,colorchannelmixer=aa=${opacity}[logo_img]`);
+    nextInputIdx += 1;
 
-    const margin = Math.round(24 * scaleFactor);
-    const topMargin = hasHeadlineBar ? Math.round(24 * scaleFactor) + headlineBoxH + Math.round(10 * scaleFactor) : margin;
-    const bottomY = `H-h-${margin + bottomStackH}`;
-    let posExpr = `W-w-${margin}:${topMargin}`;
-    switch (overlays.logoPosition) {
-      case 'top-left':
-        posExpr = `${margin}:${topMargin}`;
-        break;
-      case 'top-right':
-        posExpr = `W-w-${margin}:${topMargin}`;
-        break;
-      case 'bottom-left':
-        posExpr = `${margin}:${bottomY}`;
-        break;
-      case 'bottom-right':
-        posExpr = `W-w-${margin}:${bottomY}`;
-        break;
+    let posExpr: string;
+    if (typeof overlays.logoX === 'number' && typeof overlays.logoY === 'number') {
+      const px = Math.round((clampPercent(overlays.logoX, 82) / 100) * width);
+      const py = Math.round((clampPercent(overlays.logoY, 8) / 100) * height);
+      posExpr = `min(${px}\\,W-w):min(${py}\\,H-h)`;
+    } else {
+      const margin = Math.round(24 * scaleFactor);
+      const topMargin = hasHeadlineBar ? Math.round(24 * scaleFactor) + headlineBoxH + Math.round(10 * scaleFactor) : margin;
+      const bottomY = `H-h-${margin + bottomStackH}`;
+      posExpr = `W-w-${margin}:${topMargin}`;
+      switch (overlays.logoPosition) {
+        case 'top-left':
+          posExpr = `${margin}:${topMargin}`;
+          break;
+        case 'top-right':
+          posExpr = `W-w-${margin}:${topMargin}`;
+          break;
+        case 'bottom-left':
+          posExpr = `${margin}:${bottomY}`;
+          break;
+        case 'bottom-right':
+          posExpr = `W-w-${margin}:${bottomY}`;
+          break;
+      }
     }
     const nextLabel = 'vlogo';
     filters.push(`[${currentLabel}][logo_img]overlay=${posExpr}:shortest=0[${nextLabel}]`);
+    currentLabel = nextLabel;
+  }
+
+  if (hasImageOverlayInput) {
+    const imgWidth = Math.max(
+      64,
+      Math.round(width * (Math.min(50, Math.max(5, overlays.imageOverlayScale ?? 18)) / 100)),
+    );
+    const opacity = Math.min(1, Math.max(0.1, overlays.imageOverlayOpacity ?? 0.92)).toFixed(2);
+    filters.push(`[${nextInputIdx}:v]scale=${imgWidth}:-1,format=rgba,colorchannelmixer=aa=${opacity}[extra_img]`);
+    nextInputIdx += 1;
+
+    const px = Math.round((clampPercent(overlays.imageOverlayX, 8) / 100) * width);
+    const py = Math.round((clampPercent(overlays.imageOverlayY, 18) / 100) * height);
+    const nextLabel = 'vimg';
+    filters.push(`[${currentLabel}][extra_img]overlay=min(${px}\\,W-w):min(${py}\\,H-h):shortest=0[${nextLabel}]`);
     currentLabel = nextLabel;
   }
 
@@ -374,8 +429,16 @@ export function buildFilterGraph(
   ) {
     const boxW = Math.round(540 * scaleFactor);
     const boxH = Math.round(78 * scaleFactor);
-    const marginX = Math.round(28 * scaleFactor);
-    const boxY = height - bottomStackH - boxH - Math.round(20 * scaleFactor);
+    const defaultX = Math.round(28 * scaleFactor);
+    const defaultY = height - bottomStackH - boxH - Math.round(20 * scaleFactor);
+    const marginX =
+      typeof overlays.lowerThirdX === 'number'
+        ? Math.min(width - boxW, Math.max(8, Math.round((overlays.lowerThirdX / 100) * width)))
+        : defaultX;
+    const boxY =
+      typeof overlays.lowerThirdY === 'number'
+        ? Math.min(height - boxH, Math.max(8, Math.round((overlays.lowerThirdY / 100) * height)))
+        : defaultY;
     const stripeW = Math.round(6 * scaleFactor);
     const accentColor = sanitizeHexColor(overlays.lowerThirdAccentColor, '0x2563EB');
     const bgColor = sanitizeHexColor(overlays.lowerThirdBgColor, '0x0B0E14');
@@ -398,6 +461,40 @@ export function buildFilterGraph(
         `drawtext=${fontArg}expansion=none:textfile='${escapeFilterPath(subFile)}':fontsize=${subSize}:fontcolor=0xCBD5E1:x=${marginX + Math.round(18 * scaleFactor)}:y=${boxY + Math.round(44 * scaleFactor)}`,
       );
     }
+  }
+
+  if (overlays.customTextEnabled && overlays.customText && overlays.customText.trim().length > 0) {
+    const customFile = writeOverlayTextFile('custom-text', overlays.customText);
+    const fSize = Math.round(Math.min(64, Math.max(14, overlays.customTextFontSize ?? 24)) * scaleFactor);
+    const txtColor = sanitizeHexColor(overlays.customTextColor || '#FFFFFF', '0xFFFFFF');
+    const bgColor = sanitizeHexColor(overlays.customTextBgColor || '#1E1B4B', '0x1E1B4B');
+    const bgAlpha = Math.min(1, Math.max(0, overlays.customTextBgOpacity ?? 0.78)).toFixed(2);
+    const pctX = clampPercent(overlays.customTextX, 50);
+    const pctY = clampPercent(overlays.customTextY, 16);
+    const yExpr = `min(${Math.round((pctY / 100) * height)}\\,h-th-8)`;
+
+    let xExpr: string;
+    switch (overlays.customTextAlign) {
+      case 'left':
+        xExpr = `max(8\\,min(${Math.round((pctX / 100) * width)}\\,w-tw-8))`;
+        break;
+      case 'right':
+        xExpr = `max(8\\,min(${Math.round((pctX / 100) * width)}-tw\\,w-tw-8))`;
+        break;
+      case 'center':
+      default:
+        xExpr = `max(8\\,min(${Math.round((pctX / 100) * width)}-tw/2\\,w-tw-8))`;
+        break;
+    }
+
+    const boxArgs =
+      Number(bgAlpha) > 0
+        ? `:box=1:boxcolor=${bgColor}@${bgAlpha}:boxborderw=${Math.round(10 * scaleFactor)}`
+        : '';
+
+    textStages.push(
+      `drawtext=${fontArg}expansion=none:textfile='${escapeFilterPath(customFile)}':fontsize=${fSize}:fontcolor=${txtColor}:x=${xExpr}:y=${yExpr}${boxArgs}`,
+    );
   }
 
   if (hasBreakingBanner) {
@@ -442,25 +539,32 @@ export function buildFilterGraph(
       localtimeExpr = '%{localtime\\:%I\\\\\\:%M\\\\\\:%S %p}';
     }
 
-    let xExpr = `w-tw-${margin}`;
-    let yExpr = `${topY}`;
-    switch (overlays.clockPosition) {
-      case 'top-left':
-        xExpr = `${margin}`;
-        yExpr = `${topY}`;
-        break;
-      case 'top-right':
-        xExpr = `w-tw-${margin}`;
-        yExpr = `${topY}`;
-        break;
-      case 'bottom-left':
-        xExpr = `${margin}`;
-        yExpr = bottomY;
-        break;
-      case 'bottom-right':
-        xExpr = `w-tw-${margin}`;
-        yExpr = bottomY;
-        break;
+    let xExpr: string;
+    let yExpr: string;
+    if (typeof overlays.clockX === 'number' && typeof overlays.clockY === 'number') {
+      xExpr = `min(${Math.round((clampPercent(overlays.clockX, 76) / 100) * width)}\\,w-tw-8)`;
+      yExpr = `min(${Math.round((clampPercent(overlays.clockY, 8) / 100) * height)}\\,h-th-8)`;
+    } else {
+      xExpr = `w-tw-${margin}`;
+      yExpr = `${topY}`;
+      switch (overlays.clockPosition) {
+        case 'top-left':
+          xExpr = `${margin}`;
+          yExpr = `${topY}`;
+          break;
+        case 'top-right':
+          xExpr = `w-tw-${margin}`;
+          yExpr = `${topY}`;
+          break;
+        case 'bottom-left':
+          xExpr = `${margin}`;
+          yExpr = bottomY;
+          break;
+        case 'bottom-right':
+          xExpr = `w-tw-${margin}`;
+          yExpr = bottomY;
+          break;
+      }
     }
 
     const boxArgs =
@@ -497,27 +601,34 @@ export function buildFilterGraph(
   return filters.join(';');
 }
 
-function diagnoseRtmpError(stderrLine: string): string | null {
+function diagnoseRtmpError(stderrLine: string, platformLabel = 'RTMP'): string | null {
   const lower = stderrLine.toLowerCase();
   if (lower.includes('connection refused')) {
-    return 'RTMP connection refused by remote server. Verify the RTMP Server URL and port.';
+    return `${platformLabel} connection refused by remote server. Verify the Server URL and port.`;
   }
   if (lower.includes('name or service not known') || lower.includes('could not resolve hostname')) {
-    return 'DNS resolution failed for the RTMP server hostname. Check internet access and server URL.';
+    return `DNS resolution failed for ${platformLabel} hostname. Check internet access and server URL.`;
   }
   if (lower.includes('tls') || lower.includes('ssl') || lower.includes('gnutls')) {
-    return 'TLS/RTMPS handshake error. Ensure the server URL uses rtmps:// on port 443 and outbound TLS is allowed.';
+    return `TLS/RTMPS handshake error for ${platformLabel}. Ensure rtmps:// uses port 443 and TLS is permitted.`;
   }
   if (lower.includes('403') || lower.includes('401') || lower.includes('unauthorized') || lower.includes('rejected')) {
-    return 'Facebook rejected the RTMP stream key or connection. Generate a fresh Stream Key in Facebook Live Producer.';
+    return `${platformLabel} rejected the Stream Key or connection. Generate a fresh Stream Key in ${platformLabel} Live Producer.`;
   }
   if (lower.includes('input/output error') || lower.includes('broken pipe') || lower.includes('connection reset')) {
-    return 'RTMP stream disconnected unexpectedly (I/O or broken pipe). Check stream key validity and network stability.';
+    return `${platformLabel} stream disconnected unexpectedly (I/O or broken pipe). Check stream key validity and network stability.`;
   }
   if (lower.includes('timed out') || lower.includes('timeout')) {
-    return 'Connection to Facebook RTMP server timed out.';
+    return `Connection to ${platformLabel} RTMP server timed out.`;
   }
   return null;
+}
+
+export interface DestinationTarget {
+  id: DestinationId;
+  label: string;
+  rtmpServerUrl: string;
+  streamKey: string;
 }
 
 export interface StartStreamOptions {
@@ -529,14 +640,44 @@ export interface StartStreamOptions {
   sourceType: VideoSourceType;
   sourceLabel: string;
   quality: StreamQualityProfile;
-  rtmpServerUrl: string;
-  streamKey: string;
+  rtmpServerUrl?: string;
+  streamKey?: string;
+  destinationMode?: DestinationMode;
+  destinations?: DestinationTarget[];
   overlays: OverlayConfig;
   loopVideo: boolean;
 }
 
+interface ActivePusher {
+  id: DestinationId;
+  label: string;
+  proc: ChildProcessWithoutNullStreams;
+  pipe: PassThrough;
+  headersSent: boolean;
+  stopRequested: boolean;
+  droppedFrames: number;
+  connectedAtMs: number | null;
+}
+
+function createDefaultDestinationTelemetry(id: DestinationId, label: string): DestinationStreamTelemetry {
+  return {
+    id,
+    label,
+    connected: false,
+    status: 'Offline',
+    bitrateKbps: 0,
+    fps: 0,
+    outputResolution: '1280x720',
+    droppedFrames: 0,
+    latencyMs: 0,
+    lastError: null,
+  };
+}
+
 class StreamManager extends EventEmitter {
-  private process: ChildProcessWithoutNullStreams | null = null;
+  private compositorProcess: ChildProcessWithoutNullStreams | null = null;
+  private splitter: FlvStreamSplitter | null = null;
+  private pushers = new Map<DestinationId, ActivePusher>();
   private activeInputStream: NodeJS.ReadableStream | null = null;
   private isPipedInput = false;
   private status: StreamStatusState = 'Offline';
@@ -555,15 +696,28 @@ class StreamManager extends EventEmitter {
     loopVideo: false,
     lastError: null,
     sessionId: null,
+    destinationMode: 'facebook',
+    destinations: {
+      facebook: createDefaultDestinationTelemetry('facebook', 'Facebook Live'),
+      youtube: createDefaultDestinationTelemetry('youtube', 'YouTube Live'),
+    },
   };
   private logs: StreamLogEntry[] = [];
   private durationTimer: NodeJS.Timeout | null = null;
-  private activeSecretKey: string | null = null;
+  private activeSecretKeys = new Set<string>();
   private bitrateSamples: number[] = [];
   private stopRequested = false;
 
   public getTelemetry(): StreamTelemetry {
-    return { ...this.telemetry };
+    return {
+      ...this.telemetry,
+      destinations: this.telemetry.destinations
+        ? {
+            facebook: { ...this.telemetry.destinations.facebook },
+            youtube: { ...this.telemetry.destinations.youtube },
+          }
+        : undefined,
+    };
   }
 
   public getLogs(): StreamLogEntry[] {
@@ -575,7 +729,7 @@ class StreamManager extends EventEmitter {
   }
 
   private pushLog(level: StreamLogEntry['level'], rawMessage: string): void {
-    const safeMsg = redactSensitive(rawMessage, [this.activeSecretKey]);
+    const safeMsg = redactSensitive(rawMessage, Array.from(this.activeSecretKeys));
     const entry: StreamLogEntry = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       timestamp: new Date().toISOString(),
@@ -598,6 +752,22 @@ class StreamManager extends EventEmitter {
     this.emit('status', this.getTelemetry());
   }
 
+  private updateDestinationTelemetry(
+    id: DestinationId,
+    next: Partial<DestinationStreamTelemetry>,
+  ): void {
+    const current = this.telemetry.destinations ?? {
+      facebook: createDefaultDestinationTelemetry('facebook', 'Facebook Live'),
+      youtube: createDefaultDestinationTelemetry('youtube', 'YouTube Live'),
+    };
+    current[id] = {
+      ...current[id],
+      ...next,
+    };
+    this.telemetry.destinations = current;
+    this.emit('status', this.getTelemetry());
+  }
+
   private stopDurationTimer(): void {
     if (this.durationTimer) {
       clearInterval(this.durationTimer);
@@ -606,17 +776,42 @@ class StreamManager extends EventEmitter {
   }
 
   public async startStream(options: StartStreamOptions): Promise<StreamTelemetry> {
-    if (this.isBusy() || this.process) {
+    if (this.isBusy() || this.compositorProcess) {
       throw new Error('STREAM_ALREADY_ACTIVE');
     }
 
-    const rtmpValidation = validateRtmpUrl(options.rtmpServerUrl);
-    if (!rtmpValidation.valid || !rtmpValidation.normalized) {
-      throw new Error(rtmpValidation.error || 'Invalid RTMP Server URL.');
+    const targets: DestinationTarget[] =
+      options.destinations && options.destinations.length > 0
+        ? options.destinations
+        : options.rtmpServerUrl && options.streamKey
+          ? [
+              {
+                id: 'facebook',
+                label: 'Facebook Live',
+                rtmpServerUrl: options.rtmpServerUrl,
+                streamKey: options.streamKey,
+              },
+            ]
+          : [];
+
+    if (targets.length === 0) {
+      throw new Error('At least one RTMP destination (Facebook or YouTube) must be configured.');
     }
 
-    if (!options.streamKey || !options.streamKey.trim()) {
-      throw new Error('Facebook RTMP Stream Key is missing. Save a valid Stream Key first.');
+    const validatedTargets: DestinationTarget[] = [];
+    for (const target of targets) {
+      const check = validateRtmpUrl(target.rtmpServerUrl, target.label);
+      if (!check.valid || !check.normalized) {
+        throw new Error(check.error || `Invalid ${target.label} RTMP Server URL.`);
+      }
+      if (!target.streamKey || !target.streamKey.trim()) {
+        throw new Error(`${target.label} Stream Key is missing. Save a valid Stream Key first.`);
+      }
+      validatedTargets.push({
+        ...target,
+        rtmpServerUrl: check.normalized,
+        streamKey: target.streamKey.trim(),
+      });
     }
 
     const ffCheck = await checkFfmpegAvailability();
@@ -651,8 +846,20 @@ class StreamManager extends EventEmitter {
         options.overlays.logoPath &&
         fs.existsSync(options.overlays.logoPath),
     );
+    const hasImageInput = Boolean(
+      options.overlays.imageOverlayEnabled &&
+        options.overlays.imageOverlayPath &&
+        fs.existsSync(options.overlays.imageOverlayPath),
+    );
 
-    const filterComplex = buildFilterGraph(profile.width, profile.height, options.overlays, hasLogoInput);
+    const filterComplex = buildFilterGraph(
+      profile.width,
+      profile.height,
+      options.overlays,
+      hasLogoInput,
+      hasImageInput,
+    );
+
     const args: string[] = ['-hide_banner', '-loglevel', 'info'];
     if (options.inputStream) {
       if (options.inputFormat) {
@@ -674,6 +881,10 @@ class StreamManager extends EventEmitter {
       args.push('-i', options.overlays.logoPath);
       nextInputIndex += 1;
     }
+    if (hasImageInput && options.overlays.imageOverlayPath) {
+      args.push('-i', options.overlays.imageOverlayPath);
+      nextInputIndex += 1;
+    }
 
     let audioMapArg = '0:a:0';
     if (!probe.hasAudio) {
@@ -681,15 +892,11 @@ class StreamManager extends EventEmitter {
       audioMapArg = `${nextInputIndex}:a:0`;
     }
 
-    const baseRtmp = rtmpValidation.normalized.endsWith('/')
-      ? rtmpValidation.normalized
-      : `${rtmpValidation.normalized}/`;
-    const rtmpDestination = `${baseRtmp}${options.streamKey.trim()}`;
-
     const vBitrate = `${profile.videoBitrateKbps}k`;
     const bufSize = `${profile.videoBitrateKbps * 2}k`;
     const aBitrate = `${profile.audioBitrateKbps}k`;
 
+    // Master compositor outputs a single synchronized FLV stream (H.264 + AAC) to stdout
     args.push(
       '-filter_complex',
       filterComplex,
@@ -733,14 +940,36 @@ class StreamManager extends EventEmitter {
       'no_duration_filesize',
       '-f',
       'flv',
-      rtmpDestination,
+      'pipe:1',
     );
 
     const sessionId = `sess_${Date.now()}`;
     const startedAt = new Date().toISOString();
-    this.activeSecretKey = options.streamKey.trim();
+    this.activeSecretKeys.clear();
+    for (const t of validatedTargets) {
+      this.activeSecretKeys.add(t.streamKey);
+    }
     this.bitrateSamples = [];
     this.stopRequested = false;
+
+    const destinationMode: DestinationMode =
+      options.destinationMode ||
+      (validatedTargets.length === 2
+        ? 'both'
+        : validatedTargets[0].id === 'youtube'
+          ? 'youtube'
+          : 'facebook');
+
+    const destMap: Record<DestinationId, DestinationStreamTelemetry> = {
+      facebook: createDefaultDestinationTelemetry('facebook', 'Facebook Live'),
+      youtube: createDefaultDestinationTelemetry('youtube', 'YouTube Live'),
+    };
+    destMap.facebook.outputResolution = profile.label;
+    destMap.youtube.outputResolution = profile.label;
+    for (const t of validatedTargets) {
+      destMap[t.id].status = 'Connecting';
+      destMap[t.id].lastError = null;
+    }
 
     this.updateStatus({
       status: 'Connecting',
@@ -757,24 +986,64 @@ class StreamManager extends EventEmitter {
       loopVideo: options.loopVideo,
       lastError: null,
       sessionId,
+      destinationMode,
+      destinations: destMap,
     });
 
     this.pushLog(
       'info',
-      `Initializing FFmpeg broadcast (${profile.label} @ 30fps, ${profile.videoBitrateKbps} kbps) to ${baseRtmp}[REDACTED_STREAM_KEY]`,
+      `Initializing master FFmpeg compositor (${profile.label} @ 30fps, ${profile.videoBitrateKbps} kbps) -> ${validatedTargets.map((t) => t.label).join(' + ')}`,
     );
     if (!probe.hasAudio) {
-      this.pushLog('warn', 'Source has no audio stream; injecting silent stereo AAC track for Facebook Live RTMP compatibility.');
+      this.pushLog('warn', 'Source has no audio stream; injecting silent stereo AAC track for RTMP compatibility.');
     }
 
-    const child = spawn('ffmpeg', args, { stdio: ['pipe', 'pipe', 'pipe'] });
-    this.process = child;
+    const compositor = spawn('ffmpeg', args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    this.compositorProcess = compositor;
     this.activeInputStream = options.inputStream ?? null;
     this.isPipedInput = Boolean(options.inputStream);
 
+    // Prepare FLV splitter to fan out synchronized FLV header + sequence headers + A/V tags to pushers
+    this.splitter = new FlvStreamSplitter({
+      onHeader: (header) => {
+        for (const pusher of this.pushers.values()) {
+          if (!pusher.headersSent && !pusher.pipe.destroyed && !pusher.pipe.writableEnded) {
+            pusher.pipe.write(header);
+            pusher.headersSent = true;
+          }
+        }
+      },
+      onTag: (tag, info) => {
+        for (const pusher of this.pushers.values()) {
+          if (pusher.pipe.destroyed || pusher.pipe.writableEnded) continue;
+          if (!pusher.headersSent && this.splitter) {
+            for (const chunk of this.splitter.getBootstrapChunks()) {
+              pusher.pipe.write(chunk);
+            }
+            pusher.headersSent = true;
+            continue;
+          }
+          if (pusher.pipe.writableNeedDrain && !info.isKeyframe && !info.isSequenceHeader) {
+            pusher.droppedFrames += 1;
+            continue;
+          }
+          pusher.pipe.write(tag);
+        }
+      },
+    });
+
+    // Spawn independent RTMP pusher(s) cleanly before compositor starts emitting tags
+    for (const t of validatedTargets) {
+      this.spawnDestinationPusher(t, profile.label);
+    }
+
+    compositor.stdout.on('data', (chunk: Buffer) => {
+      this.splitter?.push(chunk);
+    });
+
     if (options.inputStream) {
-      options.inputStream.pipe(child.stdin);
-      child.stdin.on('error', () => {
+      options.inputStream.pipe(compositor.stdin);
+      compositor.stdin.on('error', () => {
         // Ignore EPIPE when FFmpeg closes stdin on shutdown
       });
     }
@@ -790,9 +1059,9 @@ class StreamManager extends EventEmitter {
     }, 1000);
 
     let stderrBuffer = '';
-    let diagnosedError: string | null = null;
+    let compositorError: string | null = null;
 
-    child.stderr.on('data', (chunk: Buffer) => {
+    compositor.stderr.on('data', (chunk: Buffer) => {
       stderrBuffer += chunk.toString('utf8');
       const lines = stderrBuffer.split(/\r|\n/);
       stderrBuffer = lines.pop() ?? '';
@@ -816,52 +1085,35 @@ class StreamManager extends EventEmitter {
             this.bitrateSamples.push(bitrate);
           }
 
-          if (this.status === 'Connecting' && frames >= 5) {
-            this.pushLog('info', 'RTMP handshake succeeded. Stream is now LIVE.');
-            this.updateStatus({
-              status: 'Live',
-              framesEncoded: frames,
-              fps,
-              bitrateKbps: bitrate,
-              speed,
-              durationSec: Math.floor((Date.now() - startMs) / 1000),
-            });
-          } else {
-            this.updateStatus({
-              framesEncoded: frames,
-              fps,
-              bitrateKbps: bitrate,
-              speed,
-            });
-          }
+          this.updateStatus({
+            framesEncoded: frames,
+            fps,
+            bitrateKbps: bitrate,
+            speed,
+            durationSec: Math.floor((Date.now() - startMs) / 1000),
+          });
           continue;
         }
 
-        const rtmpDiag = diagnoseRtmpError(line);
-        if (rtmpDiag) {
-          diagnosedError = rtmpDiag;
-          this.pushLog('error', rtmpDiag);
+        const diag = diagnoseRtmpError(line, 'Compositor');
+        if (diag) {
+          compositorError = diag;
+          this.pushLog('error', diag);
         }
         this.pushLog('ffmpeg', line);
       }
     });
 
-    child.on('error', (err) => {
-      this.stopDurationTimer();
-      const msg = redactSensitive(err.message, [this.activeSecretKey]);
-      this.pushLog('error', `FFmpeg process spawn error: ${msg}`);
-      this.process = null;
-      this.activeSecretKey = null;
-      this.updateStatus({
-        status: 'Error',
-        lastError: msg,
-        fps: 0,
-        bitrateKbps: 0,
-      });
+    compositor.on('error', (err) => {
+      const msg = redactSensitive(err.message, Array.from(this.activeSecretKeys));
+      compositorError = msg;
+      this.pushLog('error', `Master compositor process spawn error: ${msg}`);
     });
 
-    child.on('close', (code, signal) => {
+    compositor.on('close', (code, signal) => {
       this.stopDurationTimer();
+      this.closeAllPushers();
+
       const endedAt = new Date().toISOString();
       const durationSec = Math.max(0, Math.floor((Date.now() - startMs) / 1000));
       const avgBitrate =
@@ -871,7 +1123,7 @@ class StreamManager extends EventEmitter {
 
       const wasError = !this.stopRequested && code !== 0 && signal !== 'SIGTERM';
       const finalError = wasError
-        ? diagnosedError || `FFmpeg exited unexpectedly (code=${code ?? 'null'}, signal=${signal ?? 'none'}).`
+        ? compositorError || this.telemetry.lastError || `FFmpeg exited unexpectedly (code=${code ?? 'null'}, signal=${signal ?? 'none'}).`
         : null;
 
       if (wasError) {
@@ -898,7 +1150,7 @@ class StreamManager extends EventEmitter {
 
       if (this.activeInputStream) {
         try {
-          this.activeInputStream.unpipe(child.stdin);
+          this.activeInputStream.unpipe(compositor.stdin);
           if ('destroy' in this.activeInputStream && typeof this.activeInputStream.destroy === 'function') {
             this.activeInputStream.destroy();
           }
@@ -907,9 +1159,25 @@ class StreamManager extends EventEmitter {
         }
         this.activeInputStream = null;
       }
+
       this.isPipedInput = false;
-      this.process = null;
-      this.activeSecretKey = null;
+      this.compositorProcess = null;
+      this.splitter = null;
+      this.activeSecretKeys.clear();
+
+      // Mark any non-Error destination offline cleanly
+      for (const id of ['facebook', 'youtube'] as DestinationId[]) {
+        const cur = this.telemetry.destinations?.[id];
+        if (cur && cur.status !== 'Error') {
+          this.updateDestinationTelemetry(id, {
+            connected: false,
+            status: 'Offline',
+            bitrateKbps: 0,
+            fps: 0,
+          });
+        }
+      }
+
       this.updateStatus({
         status: wasError ? 'Error' : 'Offline',
         lastError: finalError,
@@ -922,24 +1190,225 @@ class StreamManager extends EventEmitter {
     return this.getTelemetry();
   }
 
-  public async stopStream(): Promise<StreamTelemetry> {
-    if (!this.process) {
-      this.stopDurationTimer();
-      this.updateStatus({
+  public startAdditionalDestination(target: DestinationTarget): boolean {
+    if (!this.compositorProcess || !this.splitter) {
+      return false;
+    }
+    const existing = this.pushers.get(target.id);
+    if (existing) {
+      return true;
+    }
+    const check = validateRtmpUrl(target.rtmpServerUrl, target.label);
+    if (!check.valid || !check.normalized || !target.streamKey.trim()) {
+      return false;
+    }
+    const cleanTarget: DestinationTarget = {
+      ...target,
+      rtmpServerUrl: check.normalized,
+      streamKey: target.streamKey.trim(),
+    };
+    this.activeSecretKeys.add(cleanTarget.streamKey);
+    const pusher = this.spawnDestinationPusher(cleanTarget, this.telemetry.outputResolution);
+    const bootstrap = this.splitter.getBootstrapChunks();
+    if (bootstrap.length > 0) {
+      for (const chunk of bootstrap) {
+        pusher.pipe.write(chunk);
+      }
+      pusher.headersSent = true;
+    }
+    return true;
+  }
+
+  public async stopDestination(id: DestinationId): Promise<StreamTelemetry> {
+    const pusher = this.pushers.get(id);
+    if (!pusher) {
+      this.updateDestinationTelemetry(id, {
+        connected: false,
         status: 'Offline',
-        fps: 0,
         bitrateKbps: 0,
-        speed: '0x',
+        fps: 0,
       });
       return this.getTelemetry();
     }
 
-    this.stopRequested = true;
-    this.pushLog('info', 'Sending graceful stop signal to FFmpeg...');
-    const proc = this.process;
-    const piped = this.isPipedInput;
-    const inputStream = this.activeInputStream;
+    pusher.stopRequested = true;
+    this.pushLog('info', `Disconnecting ${pusher.label} output...`);
+    await this.terminatePusher(pusher);
 
+    // If no active pushers remain and compositor is running, stop the broadcast cleanly
+    if (this.pushers.size === 0 && this.compositorProcess) {
+      return this.stopStream();
+    }
+    this.recomputeOverallStatusFromPushers();
+    return this.getTelemetry();
+  }
+
+  private spawnDestinationPusher(target: DestinationTarget, resolutionLabel: string): ActivePusher {
+    const baseRtmp = target.rtmpServerUrl.endsWith('/') ? target.rtmpServerUrl : `${target.rtmpServerUrl}/`;
+    const rtmpDestination = `${baseRtmp}${target.streamKey}`;
+    const pipe = new PassThrough({ highWaterMark: 1024 * 1024 });
+
+    const pusherArgs = [
+      '-hide_banner',
+      '-loglevel',
+      'info',
+      '-f',
+      'flv',
+      '-i',
+      'pipe:0',
+      '-c',
+      'copy',
+      '-flvflags',
+      'no_duration_filesize',
+      '-f',
+      'flv',
+      rtmpDestination,
+    ];
+
+    const proc = spawn('ffmpeg', pusherArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
+    const pusher: ActivePusher = {
+      id: target.id,
+      label: target.label,
+      proc,
+      pipe,
+      headersSent: false,
+      stopRequested: false,
+      droppedFrames: 0,
+      connectedAtMs: null,
+    };
+    this.pushers.set(target.id, pusher);
+
+    this.updateDestinationTelemetry(target.id, {
+      connected: false,
+      status: 'Connecting',
+      outputResolution: resolutionLabel,
+      droppedFrames: 0,
+      lastError: null,
+    });
+
+    this.pushLog('info', `Connecting ${target.label} pusher -> ${baseRtmp}[REDACTED_STREAM_KEY]`);
+
+    pipe.pipe(proc.stdin);
+    proc.stdin.on('error', () => {
+      // Ignore EPIPE on close
+    });
+
+    let stderrBuf = '';
+    let diagnosedError: string | null = null;
+    const handshakeStartMs = Date.now();
+
+    proc.stderr.on('data', (chunk: Buffer) => {
+      stderrBuf += chunk.toString('utf8');
+      const lines = stderrBuf.split(/\r|\n/);
+      stderrBuf = lines.pop() ?? '';
+
+      for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line) continue;
+
+        const frameMatch = line.match(/frame=\s*(\d+)/);
+        const fpsMatch = line.match(/fps=\s*([\d.]+)/);
+        const bitrateMatch = line.match(/bitrate=\s*([\d.]+)kbits\/s/);
+
+        if (frameMatch) {
+          const frames = Number(frameMatch[1]) || 0;
+          const fps = fpsMatch ? Number(fpsMatch[1]) || 0 : 30;
+          const bitrate = bitrateMatch ? Math.round(Number(bitrateMatch[1]) || 0) : 0;
+
+          if (pusher.connectedAtMs === null && frames >= 3) {
+            pusher.connectedAtMs = Date.now();
+            const handshakeLatency = Math.max(10, pusher.connectedAtMs - handshakeStartMs);
+            this.pushLog('info', `${target.label} RTMPS handshake succeeded. Output is LIVE.`);
+            this.updateDestinationTelemetry(target.id, {
+              connected: true,
+              status: 'Live',
+              bitrateKbps: bitrate,
+              fps,
+              droppedFrames: pusher.droppedFrames,
+              latencyMs: handshakeLatency,
+              lastError: null,
+            });
+            this.recomputeOverallStatusFromPushers();
+          } else {
+            this.updateDestinationTelemetry(target.id, {
+              bitrateKbps: bitrate,
+              fps,
+              droppedFrames: pusher.droppedFrames,
+            });
+          }
+          continue;
+        }
+
+        const diag = diagnoseRtmpError(line, target.label);
+        if (diag) {
+          diagnosedError = diag;
+          this.pushLog('error', diag);
+        }
+        this.pushLog('ffmpeg', `[${target.label}] ${line}`);
+      }
+    });
+
+    proc.on('error', (err) => {
+      const msg = redactSensitive(err.message, Array.from(this.activeSecretKeys));
+      diagnosedError = msg;
+      this.pushLog('error', `[${target.label}] Pusher spawn error: ${msg}`);
+    });
+
+    proc.on('close', (code, signal) => {
+      this.pushers.delete(target.id);
+      pipe.unpipe(proc.stdin);
+      if (!pipe.destroyed) pipe.destroy();
+
+      const wasError = !pusher.stopRequested && !this.stopRequested && code !== 0 && signal !== 'SIGTERM';
+      const errMsg = wasError
+        ? diagnosedError || `${target.label} RTMP output disconnected (code=${code ?? 'null'}).`
+        : null;
+
+      if (wasError) {
+        this.pushLog('error', errMsg!);
+      } else {
+        this.pushLog('info', `${target.label} output disconnected cleanly.`);
+      }
+
+      this.updateDestinationTelemetry(target.id, {
+        connected: false,
+        status: wasError ? 'Error' : 'Offline',
+        bitrateKbps: 0,
+        fps: 0,
+        lastError: errMsg,
+      });
+
+      this.recomputeOverallStatusFromPushers();
+
+      // If all active destination pushers are gone while compositor was running unrequested, shut down compositor
+      if (this.pushers.size === 0 && this.compositorProcess && !this.stopRequested) {
+        if (wasError && errMsg) {
+          this.updateStatus({ lastError: errMsg });
+        }
+        void this.stopCompositorOnly();
+      }
+    });
+
+    return pusher;
+  }
+
+  private recomputeOverallStatusFromPushers(): void {
+    const dest = this.telemetry.destinations;
+    if (!dest) return;
+    const anyLive = dest.facebook.status === 'Live' || dest.youtube.status === 'Live';
+    const anyConnecting = dest.facebook.status === 'Connecting' || dest.youtube.status === 'Connecting';
+    if (anyLive) {
+      if (this.status !== 'Live') {
+        this.updateStatus({ status: 'Live' });
+      }
+    } else if (anyConnecting) {
+      if (this.status !== 'Connecting') {
+        this.updateStatus({ status: 'Connecting' });
+      }
+    }
+  }
+
+  private async terminatePusher(pusher: ActivePusher): Promise<void> {
     await new Promise<void>((resolve) => {
       let settled = false;
       const done = () => {
@@ -948,15 +1417,68 @@ class StreamManager extends EventEmitter {
           resolve();
         }
       };
+      if (pusher.proc.exitCode !== null) {
+        done();
+        return;
+      }
+      pusher.proc.once('close', done);
+      try {
+        pusher.pipe.unpipe(pusher.proc.stdin);
+        if (!pusher.pipe.destroyed) pusher.pipe.destroy();
+        pusher.proc.stdin.end();
+      } catch {
+        // ignore
+      }
+      pusher.proc.kill('SIGTERM');
+      setTimeout(() => {
+        if (!settled && pusher.proc.exitCode === null) {
+          pusher.proc.kill('SIGKILL');
+          done();
+        }
+      }, 2500);
+    });
+  }
 
+  private closeAllPushers(): void {
+    for (const pusher of this.pushers.values()) {
+      pusher.stopRequested = true;
+      try {
+        pusher.pipe.unpipe(pusher.proc.stdin);
+        if (!pusher.pipe.destroyed) pusher.pipe.destroy();
+        pusher.proc.stdin.end();
+        if (pusher.proc.exitCode === null) {
+          pusher.proc.kill('SIGTERM');
+        }
+      } catch {
+        // ignore
+      }
+    }
+    this.pushers.clear();
+  }
+
+  private async stopCompositorOnly(): Promise<void> {
+    const proc = this.compositorProcess;
+    if (!proc) return;
+    this.stopRequested = true;
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const done = () => {
+        if (!settled) {
+          settled = true;
+          resolve();
+        }
+      };
+      if (proc.exitCode !== null) {
+        done();
+        return;
+      }
       proc.once('close', done);
-
-      if (piped) {
+      if (this.isPipedInput) {
         try {
-          if (inputStream) {
-            inputStream.unpipe(proc.stdin);
-            if ('destroy' in inputStream && typeof inputStream.destroy === 'function') {
-              inputStream.destroy();
+          if (this.activeInputStream) {
+            this.activeInputStream.unpipe(proc.stdin);
+            if ('destroy' in this.activeInputStream && typeof this.activeInputStream.destroy === 'function') {
+              this.activeInputStream.destroy();
             }
           }
           proc.stdin.end();
@@ -968,23 +1490,48 @@ class StreamManager extends EventEmitter {
         try {
           proc.stdin.write('q\n');
         } catch {
-          // Ignore write error if stdin already closed
+          // ignore
         }
         setTimeout(() => {
           if (!settled && proc.exitCode === null) {
             proc.kill('SIGTERM');
           }
-        }, 2000);
+        }, 1800);
       }
-
       setTimeout(() => {
         if (!settled && proc.exitCode === null) {
           proc.kill('SIGKILL');
           done();
         }
-      }, 4500);
+      }, 4000);
     });
+  }
 
+  public async stopStream(): Promise<StreamTelemetry> {
+    if (!this.compositorProcess) {
+      this.stopDurationTimer();
+      this.closeAllPushers();
+      for (const id of ['facebook', 'youtube'] as DestinationId[]) {
+        this.updateDestinationTelemetry(id, {
+          connected: false,
+          status: 'Offline',
+          bitrateKbps: 0,
+          fps: 0,
+        });
+      }
+      this.updateStatus({
+        status: 'Offline',
+        fps: 0,
+        bitrateKbps: 0,
+        speed: '0x',
+      });
+      return this.getTelemetry();
+    }
+
+    this.stopRequested = true;
+    this.pushLog('info', 'Sending graceful stop signal to FFmpeg compositor and RTMP outputs...');
+    this.closeAllPushers();
+    await this.stopCompositorOnly();
     return this.getTelemetry();
   }
 
@@ -1015,7 +1562,18 @@ class StreamManager extends EventEmitter {
     const hasLogoInput = Boolean(
       overlays.logoEnabled && overlays.logoPath && fs.existsSync(overlays.logoPath),
     );
-    const filterComplex = buildFilterGraph(profile.width, profile.height, overlays, hasLogoInput);
+    const hasImageInput = Boolean(
+      overlays.imageOverlayEnabled &&
+        overlays.imageOverlayPath &&
+        fs.existsSync(overlays.imageOverlayPath),
+    );
+    const filterComplex = buildFilterGraph(
+      profile.width,
+      profile.height,
+      overlays,
+      hasLogoInput,
+      hasImageInput,
+    );
 
     const args: string[] = ['-hide_banner', '-loglevel', 'error'];
     if (pipedOptions) {
@@ -1027,6 +1585,10 @@ class StreamManager extends EventEmitter {
     let nextIdx = 1;
     if (hasLogoInput && overlays.logoPath) {
       args.push('-i', overlays.logoPath);
+      nextIdx += 1;
+    }
+    if (hasImageInput && overlays.imageOverlayPath) {
+      args.push('-i', overlays.imageOverlayPath);
       nextIdx += 1;
     }
     let audioMapArg = '0:a:0';
@@ -1084,7 +1646,7 @@ class StreamManager extends EventEmitter {
               durationMs: Date.now() - startMs,
               ffmpegCommandSummary: `ffmpeg -f flv -i pipe:0 -filter_complex "${filterComplex.slice(0, 84)}..." -c:v libx264 -r 30 -c:a aac -f null -`,
               videoCodec: 'libx264 (H.264)',
-              audioCodec: pipedOptions.hasAudio ? 'aac (Android Playback Audio)' : 'aac (silent fallback)',
+              audioCodec: pipedOptions.hasAudio ? 'aac (Android Mixed Audio)' : 'aac (silent fallback)',
               resolution: profile.label,
               message: `Android capture dry-run encode passed in ${Date.now() - startMs}ms. Live capture A/V sync and overlays verified.`,
               stderrExcerpt: stderr.trim() || undefined,

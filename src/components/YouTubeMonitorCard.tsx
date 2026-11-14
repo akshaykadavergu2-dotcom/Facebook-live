@@ -161,6 +161,10 @@ export function YouTubeMonitorCard({
             if (cancelled) return;
             setPlaybackState('Ready');
             try {
+              const iframe = e.target.getIframe?.();
+              if (iframe) {
+                iframe.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+              }
               const muted = e.target.isMuted?.();
               if (typeof muted === 'boolean') setIsMuted(muted);
               const dur = e.target.getDuration?.();
@@ -188,14 +192,26 @@ export function YouTubeMonitorCard({
           onError: (e) => {
             if (cancelled) return;
             setPlaybackState('Restricted');
-            setPlayerError(
-              e.data === 101 || e.data === 150 || e.data === 153
-                ? `YouTube embed restricted for this stream/frame (Error ${e.data}). Open directly on YouTube, or select an authorized MP4/RTMP/SRT source on Monitor B.`
-                : `YouTube IFrame Player error code ${e.data}.`,
-            );
+            const detail =
+              e.data === 101 || e.data === 150
+                ? `Video owner disabled third-party embedding (Error ${e.data}). Tap "Watch on YouTube" below or test a publicly embeddable stream.`
+                : e.data === 152 || e.data === 153
+                  ? `YouTube player referrer/configuration blocked this embed (Error ${e.data}). Tap "Watch on YouTube" or reload with an embeddable video.`
+                  : e.data === 100
+                    ? 'YouTube video not found, private, or removed (Error 100).'
+                    : `YouTube IFrame Player error code ${e.data}.`;
+            setPlayerError(detail);
           },
         },
       });
+      try {
+        const createdIframe = containerRef.current?.querySelector('iframe');
+        if (createdIframe) {
+          createdIframe.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+        }
+      } catch {
+        // ignore
+      }
     };
 
     if (window.YT?.Player) {
@@ -254,6 +270,13 @@ export function YouTubeMonitorCard({
     setPlayerError(null);
     setControlNotice(null);
     onYouTubeValidated(null);
+  };
+
+  const handleReload = () => {
+    if (!urlInput.trim() && youtubeResult?.watchUrl) {
+      setUrlInput(youtubeResult.watchUrl);
+    }
+    void handleLoadYouTube();
   };
 
   const handlePlay = () => {
@@ -405,17 +428,26 @@ export function YouTubeMonitorCard({
               <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0B0E14]/95 p-4 text-center gap-3 z-20">
                 <AlertTriangle className="w-7 h-7 text-amber-400" />
                 <p className="text-xs sm:text-sm font-medium text-slate-200 max-w-md">{playerError}</p>
-                {youtubeResult?.watchUrl && (
-                  <a
-                    href={youtubeResult.watchUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="min-h-[44px] px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold inline-flex items-center gap-1.5"
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleReload}
+                    className="min-h-[44px] px-4 py-2 rounded-xl bg-[#1E293B] hover:bg-[#2B394F] text-slate-100 text-xs font-semibold"
                   >
-                    <span>Watch on YouTube</span>
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </a>
-                )}
+                    Reload Preview
+                  </button>
+                  {youtubeResult?.watchUrl && (
+                    <a
+                      href={youtubeResult.watchUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="min-h-[44px] px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold inline-flex items-center gap-1.5"
+                    >
+                      <span>Open in YouTube</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  )}
+                </div>
               </div>
             )}
           </>

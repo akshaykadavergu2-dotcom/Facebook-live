@@ -218,3 +218,81 @@ export function createFlvAacAudioTag(rawAacFrame: Buffer, timestampMs: number): 
   rawAacFrame.copy(body, 2);
   return wrapFlvTag(0x08, body, timestampMs);
 }
+
+export interface FlvTagCallback {
+  onHeader?: (header: Buffer) => void;
+  onTag: (tag: Buffer, info: { tagType: number; isKeyframe: boolean; isSequenceHeader: boolean }) => void;
+}
+
+/**
+ * Splits a continuous FLV byte stream (such as master FFmpeg stdout `-f flv pipe:1`)
+ * into discrete 13-byte header + FLV tags so multiple independent RTMP pushers
+ * can receive identical video+audio frames and bootstrap cleanly on late/reconnect attach.
+ */
+export class FlvStreamSplitter {
+  private buffer: Buffer = Buffer.alloc(0);
+  private headerParsed = false;
+  public header: Buffer | null = null;
+  public metadataTag: Buffer | null = null;
+  public avcSeqTag: Buffer | null = null;
+  public aacSeqTag: Buffer | null = null;
+  public latestGopTags: Buffer[] = [];
+  private readonly callbacks: FlvTagCallback;
+
+  constructor(callbacks: FlvTagCallback) {
+    this.callbacks = callbacks;
+  }
+
+  public push(chunk: Buffer): void {
+    this.buffer = this.buffer.length === 0 ? chunk : Buffer.concat([this.buffer, chunk]);
+
+    if (!this.headerParsed) {
+      if (this.buffer.length < 13) return;
+      this.header = Buffer.from(this.buffer.subarray(0, 13));
+      this.buffer = this.buffer.subarray(13);
+      this.headerParsed = true;
+      this.callbacks.onHeader?.(this.header);
+    }
+
+    while (this.buffer.length >= 15) {
+      const dataSize = (this.buffer[1] << 16) | (this.buffer[2] << 8) | this.buffer[3];
+      const totalLen = 11 + dataSize + 4;
+      if (this.buffer.length < totalLen) break;
+
+      const tag = Buffer.from(this.buffer.subarray(0, totalLen));
+      this.buffer = this.buffer.subarray(totalLen);
+
+      const tagType = tag[0];
+      const isVideoSeq = tagType === 0x09 && dataSize >= 2 && (tag[11] & 0x0f) === 7 && tag[12] === 0x00;
+      const isAudioSeq = tagType === 0x08 && dataSize >= 2 && ((tag[11] >> 4) & 0x0f) === 10 && tag[12] === 0x00;
+      const isScript = tagType === 0x12;
+      const isKeyframe = tagType === 0x09 && dataSize >= 2 && (tag[11] >> 4) === 1 && tag[12] === 0x01;
+      const isSequenceHeader = isVideoSeq || isAudioSeq || isScript;
+
+      if (isScript) this.metadataTag = tag;
+      else if (isVideoSeq) this.avcSeqTag = tag;
+      else if (isAudioSeq) this.aacSeqTag = tag;
+      else if (tagType === 0x09 || tagType === 0x08) {
+        if (isKeyframe) {
+          this.latestGopTags = [tag];
+        } else if (this.latestGopTags.length > 0 && this.latestGopTags.length < 240) {
+          this.latestGopTags.push(tag);
+        }
+      }
+
+      this.callbacks.onTag(tag, { tagType, isKeyframe, isSequenceHeader });
+    }
+  }
+
+  public getBootstrapChunks(): Buffer[] {
+    const out: Buffer[] = [];
+    if (this.header) out.push(this.header);
+    if (this.metadataTag) out.push(this.metadataTag);
+    if (this.avcSeqTag) out.push(this.avcSeqTag);
+    if (this.aacSeqTag) out.push(this.aacSeqTag);
+    for (const t of this.latestGopTags) {
+      out.push(t);
+    }
+    return out;
+  }
+}

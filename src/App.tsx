@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Menu, Radio, RefreshCw, Wifi, WifiOff } from 'lucide-react';
 import type {
   AndroidCaptureTelemetry,
+  DestinationMode,
   OverlayConfig,
   RtmpPublicConfig,
   SecurityStatusInfo,
@@ -13,6 +14,7 @@ import type {
   YouTubeValidationResult,
 } from '../shared/types';
 import { api, API_BASE_URL, formatDuration, getWebSocketUrl } from './lib/api';
+import { useInAppLiveCapture } from './lib/useInAppLiveCapture';
 import { AndroidLiveCaptureView } from './components/AndroidLiveCaptureView';
 import { DashboardView } from './components/DashboardView';
 import { FacebookOutputView } from './components/FacebookOutputView';
@@ -106,32 +108,16 @@ const INITIAL_CAPTURE_TELEMETRY: AndroidCaptureTelemetry = {
 const SECTION_TITLES: Record<NavSection, string> = {
   dashboard: 'Dashboard',
   studio: 'Live Studio',
-  'android-capture': 'Android Live Capture',
+  'android-capture': 'In-App Live Capture',
   youtube: 'YouTube Preview',
   overlays: 'Overlays & Graphics',
-  facebook: 'Facebook Output',
+  facebook: 'Broadcast Output',
   history: 'Stream History',
   settings: 'Settings & Deployment',
 };
 
 export default function App() {
-  const [companionMissingNotice, setCompanionMissingNotice] = useState<string | null>(() => {
-    if (typeof window === 'undefined') return null;
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('companion') === 'missing') {
-      return 'Livecast Android Capture (com.livecast.capture) is not installed on this Android phone yet. Tap DOWNLOAD ANDROID APP above to install livecast-companion.apk first, or paste Session ID & Ephemeral Ingest Token manually if already installed.';
-    }
-    return null;
-  });
-  const [section, setSection] = useState<NavSection>(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('companion') === 'missing') {
-        return 'android-capture';
-      }
-    }
-    return 'studio';
-  });
+  const [section, setSection] = useState<NavSection>('studio');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const [security, setSecurity] = useState<SecurityStatusInfo | null>(null);
@@ -150,6 +136,13 @@ export default function App() {
     maskedStreamKey: '',
     updatedAt: null,
   });
+  const [youtubeRtmpConfig, setYoutubeRtmpConfig] = useState<RtmpPublicConfig>({
+    serverUrl: 'rtmps://a.rtmps.youtube.com:443/live2',
+    hasStreamKey: false,
+    maskedStreamKey: '',
+    updatedAt: null,
+  });
+  const [destinationMode, setDestinationMode] = useState<DestinationMode>('facebook');
   const [videos, setVideos] = useState<VideoAsset[]>([]);
   const [overlays, setOverlays] = useState<OverlayConfig>(INITIAL_OVERLAYS);
   const [history, setHistory] = useState<StreamHistoryEntry[]>([]);
@@ -166,6 +159,15 @@ export default function App() {
   const [wsError, setWsError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
+  const handleSelectCaptureSource = useCallback(() => {
+    setSourceType('android-capture');
+  }, []);
+
+  const inAppCapture = useInAppLiveCapture({
+    onTelemetryUpdated: setCaptureTelemetry,
+    onSelectCaptureSource: handleSelectCaptureSource,
+  });
+
   const loadStudioData = useCallback(async () => {
     setBackendError(null);
 
@@ -173,7 +175,7 @@ export default function App() {
       healthOutcome,
       securityOutcome,
       statusOutcome,
-      rtmpOutcome,
+      destsOutcome,
       videosOutcome,
       overlaysOutcome,
       historyOutcome,
@@ -182,7 +184,7 @@ export default function App() {
       api.getHealth(),
       api.getSecurityStatus(),
       api.getStreamStatus(),
-      api.getRtmpConfig(),
+      api.getDestinations(),
       api.getVideos(),
       api.getOverlays(),
       api.getHistory(),
@@ -196,10 +198,14 @@ export default function App() {
       setTelemetry(statusOutcome.value.telemetry);
       setQuality(statusOutcome.value.telemetry.quality);
       setLoopVideo(statusOutcome.value.telemetry.loopVideo);
+      if (statusOutcome.value.telemetry.destinationMode) {
+        setDestinationMode(statusOutcome.value.telemetry.destinationMode);
+      }
       setLogs(statusOutcome.value.logs);
     }
-    if (rtmpOutcome.status === 'fulfilled') {
-      setRtmpConfig(rtmpOutcome.value);
+    if (destsOutcome.status === 'fulfilled') {
+      setRtmpConfig(destsOutcome.value.facebook);
+      setYoutubeRtmpConfig(destsOutcome.value.youtube);
     }
     if (videosOutcome.status === 'fulfilled') {
       const list = videosOutcome.value.videos;
@@ -229,7 +235,7 @@ export default function App() {
 
     checkFailure('/api/security/status', securityOutcome);
     checkFailure('/api/stream/status', statusOutcome);
-    checkFailure('/api/stream/credentials', rtmpOutcome);
+    checkFailure('/api/stream/destinations', destsOutcome);
     checkFailure('/api/videos', videosOutcome);
     checkFailure('/api/overlays', overlaysOutcome);
     checkFailure('/api/history', historyOutcome);
@@ -251,16 +257,6 @@ export default function App() {
           ? `${healthSummary}. Failing request(s): ${detailLines}`
           : healthSummary,
       );
-    }
-  }, []);
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const url = new URL(window.location.href);
-      if (url.searchParams.has('companion')) {
-        url.searchParams.delete('companion');
-        window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
-      }
     }
   }, []);
 
@@ -561,6 +557,9 @@ export default function App() {
             <LiveStudioView
               telemetry={telemetry}
               captureTelemetry={captureTelemetry}
+              inAppCapture={inAppCapture}
+              destinationMode={destinationMode}
+              onChangeDestinationMode={setDestinationMode}
               logs={logs}
               videos={videos}
               overlays={overlays}
@@ -586,12 +585,15 @@ export default function App() {
 
           {section === 'android-capture' && (
             <AndroidLiveCaptureView
+              inAppCapture={inAppCapture}
               captureTelemetry={captureTelemetry}
-              onCaptureTelemetryUpdated={setCaptureTelemetry}
               telemetry={telemetry}
               logs={logs}
               overlays={overlays}
               rtmpConfig={rtmpConfig}
+              youtubeRtmpConfig={youtubeRtmpConfig}
+              destinationMode={destinationMode}
+              onChangeDestinationMode={setDestinationMode}
               youtubeResult={youtubeResult}
               onYouTubeValidated={setYoutubeResult}
               quality={quality}
@@ -599,8 +601,6 @@ export default function App() {
               onTelemetryUpdated={setTelemetry}
               onChangeSourceType={setSourceType}
               onNavigate={setSection}
-              initialNotice={companionMissingNotice}
-              onDismissInitialNotice={() => setCompanionMissingNotice(null)}
             />
           )}
 
@@ -619,6 +619,7 @@ export default function App() {
               sourceType={sourceType}
               selectedVideo={selectedVideo}
               directUrl={directUrl}
+              captureStream={inAppCapture.captureStream}
               captureTelemetry={captureTelemetry}
               streamStatus={telemetry.status}
             />
@@ -629,6 +630,9 @@ export default function App() {
               telemetry={telemetry}
               logs={logs}
               rtmpConfig={rtmpConfig}
+              youtubeRtmpConfig={youtubeRtmpConfig}
+              destinationMode={destinationMode}
+              onChangeDestinationMode={setDestinationMode}
               sourceType={sourceType}
               selectedVideo={selectedVideo}
               directUrl={directUrl}
@@ -638,6 +642,7 @@ export default function App() {
               loopVideo={loopVideo}
               onChangeLoopVideo={setLoopVideo}
               onRtmpUpdated={setRtmpConfig}
+              onYoutubeRtmpUpdated={setYoutubeRtmpConfig}
               onTelemetryUpdated={setTelemetry}
               onNavigate={setSection}
             />
@@ -650,8 +655,10 @@ export default function App() {
           {section === 'settings' && (
             <SettingsView
               rtmpConfig={rtmpConfig}
+              youtubeRtmpConfig={youtubeRtmpConfig}
               security={security}
               onRtmpUpdated={setRtmpConfig}
+              onYoutubeRtmpUpdated={setYoutubeRtmpConfig}
             />
           )}
         </main>

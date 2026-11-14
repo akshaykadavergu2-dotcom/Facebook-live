@@ -1,265 +1,342 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/studio_bg"
-    android:fillViewport="true">
+    android:orientation="vertical">
 
+    <!-- Top Broadcast Control Header -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="16dp">
+        android:background="@color/studio_navy"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="14dp"
+        android:paddingTop="10dp"
+        android:paddingEnd="14dp"
+        android:paddingBottom="10dp">
 
         <LinearLayout
-            android:layout_width="match_parent"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:background="@color/studio_surface"
-            android:orientation="vertical"
-            android:padding="16dp">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="LIVECAST ANDROID CAPTURE"
-                    android:textColor="@color/studio_text_primary"
-                    android:textSize="16sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/tvLiveIndicator"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:background="@color/studio_emerald"
-                    android:paddingLeft="8dp"
-                    android:paddingTop="3dp"
-                    android:paddingRight="8dp"
-                    android:paddingBottom="3dp"
-                    android:text="LIVE CAPTURE"
-                    android:textColor="#FFFFFF"
-                    android:textSize="11sp"
-                    android:textStyle="bold"
-                    android:visibility="gone" />
-            </LinearLayout>
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:text="Captures ONLY the dedicated fullscreen Monitor A YouTube view (MediaProjection + permitted AudioPlaybackCapture). Excludes browser chrome and dashboard controls."
-                android:textColor="@color/studio_text_muted"
-                android:textSize="12sp" />
-        </LinearLayout>
-
-        <!-- Session Inputs -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:background="@color/studio_surface"
-            android:orientation="vertical"
-            android:padding="16dp">
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Backend URL"
-                android:textColor="@color/studio_text_muted"
-                android:textSize="12sp" />
-
-            <EditText
-                android:id="@+id/etBackendUrl"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:layout_marginTop="4dp"
-                android:background="@color/studio_surface_alt"
-                android:hint="https://facebook-live-gvx5.onrender.com"
-                android:inputType="textUri"
-                android:padding="10dp"
-                android:text="https://facebook-live-gvx5.onrender.com"
-                android:textColor="@color/studio_text_primary"
-                android:textColorHint="@color/studio_text_muted"
-                android:textSize="13sp" />
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:text="Session ID"
-                android:textColor="@color/studio_text_muted"
-                android:textSize="12sp" />
-
-            <EditText
-                android:id="@+id/etSessionId"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:layout_marginTop="4dp"
-                android:background="@color/studio_surface_alt"
-                android:hint="cap_..."
-                android:inputType="text"
-                android:padding="10dp"
-                android:textColor="@color/studio_text_primary"
-                android:textColorHint="@color/studio_text_muted"
-                android:textSize="13sp" />
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:text="Ephemeral Ingest Token"
-                android:textColor="@color/studio_text_muted"
-                android:textSize="12sp" />
-
-            <EditText
-                android:id="@+id/etIngestToken"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:layout_marginTop="4dp"
-                android:background="@color/studio_surface_alt"
-                android:hint="Paste 48-hex ingest token from studio"
-                android:inputType="textPassword"
-                android:padding="10dp"
-                android:textColor="@color/studio_text_primary"
-                android:textColorHint="@color/studio_text_muted"
-                android:textSize="13sp" />
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:text="Monitor A YouTube Live / Video URL"
-                android:textColor="@color/studio_text_muted"
-                android:textSize="12sp" />
-
-            <EditText
-                android:id="@+id/etYoutubeUrl"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:layout_marginTop="4dp"
-                android:background="@color/studio_surface_alt"
-                android:hint="https://www.youtube.com/watch?v=... or /live/..."
-                android:inputType="textUri"
-                android:padding="10dp"
-                android:textColor="@color/studio_text_primary"
-                android:textColorHint="@color/studio_text_muted"
-                android:textSize="13sp" />
-        </LinearLayout>
-
-        <!-- Primary Action Buttons -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
+            android:layout_weight="1"
             android:orientation="vertical">
 
-            <Button
-                android:id="@+id/btnConnectBackend"
-                android:layout_width="match_parent"
-                android:layout_height="52dp"
-                android:backgroundTint="@color/studio_blue"
-                android:text="CONNECT ANDROID TO BACKEND"
-                android:textColor="#FFFFFF"
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:letterSpacing="0.06"
+                android:text="LIVECAST STUDIO"
+                android:textColor="@color/studio_text_primary"
+                android:textSize="16sp"
                 android:textStyle="bold" />
 
-            <Button
-                android:id="@+id/btnStartCapture"
-                android:layout_width="match_parent"
-                android:layout_height="52dp"
-                android:layout_marginTop="8dp"
-                android:backgroundTint="@color/studio_emerald"
-                android:text="START CAPTURE (MONITOR A)"
-                android:textColor="#FFFFFF"
-                android:textStyle="bold" />
-
-            <Button
-                android:id="@+id/btnStopCapture"
-                android:layout_width="match_parent"
-                android:layout_height="52dp"
-                android:layout_marginTop="8dp"
-                android:backgroundTint="@color/studio_rose"
-                android:text="STOP CAPTURE"
-                android:textColor="#FFFFFF"
-                android:textStyle="bold" />
+            <TextView
+                android:id="@+id/tvHeaderSubtitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="TV Broadcast Control Room"
+                android:textColor="@color/studio_cyan"
+                android:textSize="11sp" />
         </LinearLayout>
 
-        <!-- Real-Time Honest Telemetry -->
+        <TextView
+            android:id="@+id/tvHeaderBackendChip"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
+            android:background="@drawable/bg_pill_unselected"
+            android:paddingStart="10dp"
+            android:paddingTop="5dp"
+            android:paddingEnd="10dp"
+            android:paddingBottom="5dp"
+            android:text="Server: Checking"
+            android:textColor="@color/studio_text_muted"
+            android:textSize="11sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvHeaderLiveBadge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_pill_unselected"
+            android:paddingStart="10dp"
+            android:paddingTop="5dp"
+            android:paddingEnd="10dp"
+            android:paddingBottom="5dp"
+            android:text="OFFLINE"
+            android:textColor="@color/studio_text_muted"
+            android:textSize="11sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/studio_border" />
+
+    <!-- Global Error Banner -->
+    <TextView
+        android:id="@+id/tvGlobalErrorBanner"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="12dp"
+        android:layout_marginTop="8dp"
+        android:layout_marginEnd="12dp"
+        android:background="@drawable/bg_card_orange"
+        android:padding="10dp"
+        android:textColor="#FEF2F2"
+        android:textSize="12sp"
+        android:visibility="gone" />
+
+    <!-- 6-Screen Studio Switcher -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <include
+            android:id="@+id/tabHome"
+            layout="@layout/view_tab_home"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="visible" />
+
+        <include
+            android:id="@+id/tabStudio"
+            layout="@layout/view_tab_studio"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone" />
+
+        <include
+            android:id="@+id/tabPreview"
+            layout="@layout/view_tab_preview"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone" />
+
+        <include
+            android:id="@+id/tabRecording"
+            layout="@layout/view_tab_recording"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone" />
+
+        <include
+            android:id="@+id/tabMixer"
+            layout="@layout/view_tab_mixer"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone" />
+
+        <include
+            android:id="@+id/tabOutput"
+            layout="@layout/view_tab_output"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone" />
+
+        <include
+            android:id="@+id/tabSettings"
+            layout="@layout/view_tab_settings"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone" />
+    </FrameLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/studio_border" />
+
+    <!-- Custom Animated 7-Tab Bottom Navigation Bar -->
+    <FrameLayout
+        android:id="@+id/bottomNavContainer"
+        android:layout_width="match_parent"
+        android:layout_height="64dp"
+        android:background="@color/studio_navy"
+        android:paddingStart="4dp"
+        android:paddingTop="5dp"
+        android:paddingEnd="4dp"
+        android:paddingBottom="5dp">
+
+        <View
+            android:id="@+id/navActivePill"
+            android:layout_width="48dp"
+            android:layout_height="match_parent"
+            android:layout_gravity="start|center_vertical"
+            android:background="@drawable/bg_pill_selected" />
+
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:background="@color/studio_surface"
-            android:orientation="vertical"
-            android:padding="16dp">
+            android:layout_height="match_parent"
+            android:baselineAligned="false"
+            android:orientation="horizontal">
 
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="LIVE CAPTURE TELEMETRY"
-                android:textColor="@color/studio_text_primary"
-                android:textSize="13sp"
-                android:textStyle="bold" />
+            <LinearLayout
+                android:id="@+id/navHome"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:orientation="vertical">
+                <ImageView
+                    android:id="@+id/ivNavHome"
+                    android:layout_width="19dp"
+                    android:layout_height="19dp"
+                    android:contentDescription="Home"
+                    android:src="@drawable/ic_nav_home" />
+                <TextView
+                    android:id="@+id/tvNavHome"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="Home"
+                    android:textColor="@color/studio_text_primary"
+                    android:textSize="9.5sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
 
-            <TextView
-                android:id="@+id/tvPermissionStatus"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="Capture Permission: Not Granted"
-                android:textColor="@color/studio_text_muted"
-                android:textSize="12sp" />
+            <LinearLayout
+                android:id="@+id/navStudio"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:orientation="vertical">
+                <ImageView
+                    android:id="@+id/ivNavStudio"
+                    android:layout_width="19dp"
+                    android:layout_height="19dp"
+                    android:contentDescription="Studio"
+                    android:src="@drawable/ic_nav_studio" />
+                <TextView
+                    android:id="@+id/tvNavStudio"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="Studio"
+                    android:textColor="@color/studio_text_muted"
+                    android:textSize="9.5sp" />
+            </LinearLayout>
 
-            <TextView
-                android:id="@+id/tvConnectionStatus"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="Backend Connection: Disconnected"
-                android:textColor="@color/studio_text_primary"
-                android:textSize="12sp" />
+            <LinearLayout
+                android:id="@+id/navPreview"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:orientation="vertical">
+                <ImageView
+                    android:id="@+id/ivNavPreview"
+                    android:layout_width="19dp"
+                    android:layout_height="19dp"
+                    android:contentDescription="Preview"
+                    android:src="@drawable/ic_nav_preview" />
+                <TextView
+                    android:id="@+id/tvNavPreview"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="Preview"
+                    android:textColor="@color/studio_text_muted"
+                    android:textSize="9.5sp" />
+            </LinearLayout>
 
-            <TextView
-                android:id="@+id/tvVideoStatus"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="Video Status: IDLE"
-                android:textColor="@color/studio_text_primary"
-                android:textSize="12sp" />
+            <LinearLayout
+                android:id="@+id/navRecording"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:orientation="vertical">
+                <ImageView
+                    android:id="@+id/ivNavRecording"
+                    android:layout_width="19dp"
+                    android:layout_height="19dp"
+                    android:contentDescription="Recording"
+                    android:src="@drawable/ic_nav_recording" />
+                <TextView
+                    android:id="@+id/tvNavRecording"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="Recording"
+                    android:textColor="@color/studio_text_muted"
+                    android:textSize="9.5sp" />
+            </LinearLayout>
 
-            <TextView
-                android:id="@+id/tvAudioStatus"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="Audio Status: IDLE"
-                android:textColor="@color/studio_text_primary"
-                android:textSize="12sp" />
+            <LinearLayout
+                android:id="@+id/navMixer"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:orientation="vertical">
+                <ImageView
+                    android:id="@+id/ivNavMixer"
+                    android:layout_width="19dp"
+                    android:layout_height="19dp"
+                    android:contentDescription="Audio Mixer"
+                    android:src="@drawable/ic_nav_mixer" />
+                <TextView
+                    android:id="@+id/tvNavMixer"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="Audio"
+                    android:textColor="@color/studio_text_muted"
+                    android:textSize="9.5sp" />
+            </LinearLayout>
 
-            <TextView
-                android:id="@+id/tvStreamMetrics"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="Metrics: 0 fps · 0x0 · 0 Hz · 0 ms"
-                android:textColor="@color/studio_text_muted"
-                android:textSize="12sp" />
+            <LinearLayout
+                android:id="@+id/navOutput"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:orientation="vertical">
+                <ImageView
+                    android:id="@+id/ivNavOutput"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:contentDescription="Program Output"
+                    android:src="@drawable/ic_nav_output" />
+                <TextView
+                    android:id="@+id/tvNavOutput"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="Output"
+                    android:textColor="@color/studio_text_muted"
+                    android:textSize="10sp" />
+            </LinearLayout>
 
-            <TextView
-                android:id="@+id/tvErrorBanner"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:textColor="#FDA4AF"
-                android:textSize="12sp"
-                android:visibility="gone" />
+            <LinearLayout
+                android:id="@+id/navSettings"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:orientation="vertical">
+                <ImageView
+                    android:id="@+id/ivNavSettings"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:contentDescription="Settings"
+                    android:src="@drawable/ic_nav_settings" />
+                <TextView
+                    android:id="@+id/tvNavSettings"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="Settings"
+                    android:textColor="@color/studio_text_muted"
+                    android:textSize="10sp" />
+            </LinearLayout>
         </LinearLayout>
+    </FrameLayout>
 
-    </LinearLayout>
-</ScrollView>
+</LinearLayout>
