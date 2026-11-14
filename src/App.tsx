@@ -260,7 +260,7 @@ export default function App() {
   const selectedVideo = videos.find((v) => v.id === selectedVideoId) ?? videos[0] ?? null;
 
   return (
-    <div className="min-h-screen h-screen bg-[#0B0E14] text-slate-100 flex overflow-hidden w-full max-w-full">
+    <div className="min-h-screen bg-[#0B0E14] text-slate-100 flex w-full max-w-full">
       <Sidebar
         activeSection={section}
         onSelect={setSection}
