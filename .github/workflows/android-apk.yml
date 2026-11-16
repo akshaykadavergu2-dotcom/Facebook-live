@@ -2,7 +2,7 @@ name: Build Android Companion APK
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, 'feature/streamkaro-studio-foundation' ]
     paths:
       - 'android-capture/**'
       - '.github/workflows/android-apk.yml'
