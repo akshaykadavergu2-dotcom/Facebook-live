@@ -99,7 +99,11 @@ jobs:
           }
           EOF
 
+      # Pull-request refs (refs/pull/<number>/merge) are read-only synthetic refs.
+      # Keep the APK as a downloadable Actions artifact for PR validation; only
+      # publish back to a real branch on push/workflow_dispatch events.
       - name: Commit and push published APK for Netlify auto-deployment
+        if: github.event_name != 'pull_request'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
