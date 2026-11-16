@@ -5,10 +5,11 @@ import android.os.Bundle
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
 import com.livecast.capture.databinding.ActivitySplashIntroBinding
+import com.livecast.capture.studio.ui.StudioHomeActivity
 
 /**
- * Broadcast opening intro screen (~3.5s) with Skip Intro button and smart cooldown
- * so deep links and quick task switches go straight to the Studio Control Room.
+ * Broadcast opening intro screen (~3.5s) with Skip Intro button and smart cooldown.
+ * App links continue to open the existing capture studio directly.
  */
 class SplashIntroActivity : AppCompatActivity() {
 
@@ -26,8 +27,12 @@ class SplashIntroActivity : AppCompatActivity() {
         val forcePlay = intent?.getBooleanExtra(EXTRA_FORCE_PLAY, false) == true
         val store = SecureCredentialStore(this)
 
-        if (!forcePlay && (isDeepLink || !store.shouldShowSplashIntro())) {
+        if (isDeepLink) {
             forwardToMain()
+            return
+        }
+        if (!forcePlay && !store.shouldShowSplashIntro()) {
+            forwardToStudio()
             return
         }
 
@@ -42,18 +47,28 @@ class SplashIntroActivity : AppCompatActivity() {
 
         binding.btnSkipIntro.setOnClickListener {
             binding.splashIntroView.cancelAnimation()
-            forwardToMain()
+            forwardToStudio()
         }
 
         binding.splashIntroView.startAnimation(durationMs = 3500L) {
-            forwardToMain()
+            forwardToStudio()
         }
+    }
+
+    private fun forwardToStudio() {
+        if (navigated || isFinishing) return
+        navigated = true
+        startActivity(Intent(this, StudioHomeActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION)
+        })
+        finish()
+        @Suppress("DEPRECATION")
+        overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
     }
 
     private fun forwardToMain() {
         if (navigated || isFinishing) return
         navigated = true
-
         val target = Intent(this, MainActivity::class.java).apply {
             action = intent?.action
             data = intent?.data
