@@ -488,6 +488,12 @@ class MainActivity : AppCompatActivity() {
                     previewMuted = muted
                     p.btnPreviewMute.text = if (muted) "Unmute" else "Mute"
                 }
+
+                override fun onAutoplayBlocked() {
+                    p.tvPreviewErrorBanner.visibility = View.VISIBLE
+                    p.tvPreviewErrorBanner.text =
+                        "YouTube blocked automatic playback. Tap Play in the video player, or use Open in YouTube."
+                }
             },
         )
         previewPlayer.configure()
