@@ -27,6 +27,7 @@ class YouTubePlayerHelper(
         fun onPlayerStateChanged(statusText: String, isPlaying: Boolean)
         fun onPlayerError(code: Int, readableMessage: String)
         fun onMutedChanged(muted: Boolean)
+        fun onAutoplayBlocked() {}
     }
 
     companion object {
@@ -233,6 +234,11 @@ class YouTubePlayerHelper(
                         if (window.LivecastYtBridge) {
                           window.LivecastYtBridge.onError(e.data);
                         }
+                      },
+                      onAutoplayBlocked: function() {
+                        if (window.LivecastYtBridge) {
+                          window.LivecastYtBridge.onAutoplayBlocked();
+                        }
                       }
                     }
                   });
@@ -272,7 +278,10 @@ class YouTubePlayerHelper(
                 val (label, playing) = when (code) {
                     1 -> "Playing" to true
                     2 -> "Paused" to false
-                    3 -> "Buffering" to false
+                    // Buffering is still an active playback request. Keep the
+                    // control in the Pause state so a second tap doesn't issue
+                    // another playVideo() call while YouTube is buffering.
+                    3 -> "Buffering" to true
                     0 -> "Ended" to false
                     5 -> "Ready" to false
                     else -> "Ready" to false
@@ -290,6 +299,14 @@ class YouTubePlayerHelper(
         }
 
         @JavascriptInterface
+        fun onAutoplayBlocked() {
+            mainHandler.post {
+                listener.onAutoplayBlocked()
+                listener.onPlayerStateChanged("Tap Play in the YouTube player", false)
+            }
+        }
+
+        @JavascriptInterface
         fun onError(code: Int) {
             mainHandler.post {
                 val msg = when (code) {
@@ -297,7 +314,8 @@ class YouTubePlayerHelper(
                     5 -> "HTML5 player error inside Android WebView (Error 5). Tap Reload Preview."
                     100 -> "Video removed, private, or not found (Error 100)."
                     101, 150 -> "The video owner disabled embedded playback (Error $code). Tap Open in YouTube or load an embeddable stream."
-                    152, 153 -> "YouTube player blocked embedded playback configuration (Error $code). Reload or open directly in YouTube."
+                    153 -> "YouTube blocked this embed because the request is missing its HTTP Referer or app identity (Error 153). Reload the player from the app's HTTPS base URL, or open in YouTube."
+                    152 -> "YouTube returned player error 152. This is an embed/player restriction; retry once or open the video in YouTube."
                     else -> "YouTube player error code $code."
                 }
                 listener.onPlayerStateChanged("Error $code", false)
